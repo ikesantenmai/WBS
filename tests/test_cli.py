@@ -88,3 +88,48 @@ def test_only_new_and_serve_are_offered(capsys):
     out = capsys.readouterr().out
     assert "{new,serve}" in out
     assert "build" not in out
+
+
+# ---------------------------------------------------------------- serve
+@pytest.mark.parametrize("env,expected", [
+    ({}, ("127.0.0.1", 8000)),
+    ({"PORT": "10000"}, ("0.0.0.0", 10000)),          # Render などが渡してくる
+    ({"PORT": "10000", "HOST": "127.0.0.1"}, ("127.0.0.1", 10000)),
+    ({"PORT": "not-a-number"}, ("127.0.0.1", 8000)),  # 壊れた値は無視する
+])
+def test_serve_defaults_follow_the_environment(monkeypatch, env, expected):
+    """PaaS は待ち受けポートを環境変数 PORT で渡してくる。
+
+    そのときは 0.0.0.0 で待ち受けないと外部から届かないので、
+    引数なしの `wbsgen serve` だけで動くようにしてある。
+    """
+    from wbsgen import cli
+
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.delenv("HOST", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    host, port, _hosted = cli._serve_defaults()
+    assert (host, port) == expected
+
+
+def test_serve_arguments_win_over_the_environment(monkeypatch):
+    from wbsgen import cli
+
+    monkeypatch.setenv("PORT", "10000")
+    called = {}
+    monkeypatch.setattr("wbsgen.web.serve",
+                        lambda **kw: called.update(kw))
+    assert cli.main(["serve", "--host", "192.168.0.5", "--port", "9999"]) == 0
+    assert called == {"host": "192.168.0.5", "port": 9999, "reload": False}
+
+
+def test_serve_needs_no_arguments_on_a_paas(monkeypatch):
+    from wbsgen import cli
+
+    monkeypatch.setenv("PORT", "10000")
+    called = {}
+    monkeypatch.setattr("wbsgen.web.serve", lambda **kw: called.update(kw))
+    assert cli.main(["serve"]) == 0
+    assert called == {"host": "0.0.0.0", "port": 10000, "reload": False}

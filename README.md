@@ -79,6 +79,9 @@ wbsgen new --start YYYY-MM-DD [--end YYYY-MM-DD | --period-days N | --months N]
 wbsgen serve [--host 127.0.0.1] [--port 8000] [--reload]
 ```
 
+`serve` の待ち受け先は環境変数 `HOST` / `PORT` でも指定できます。
+`PORT` があるときはホストの既定が `0.0.0.0` になります。
+
 | オプション | 説明 |
 |-----------|------|
 | `--start` | 開始日 (必須) |
@@ -158,16 +161,15 @@ Web Service を作り、次の 2 つを設定します。
 | 項目 | 値 |
 |------|-----|
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `wbsgen serve --host 0.0.0.0 --port $PORT` |
+| Start Command | `wbsgen serve` |
 
-`--host 0.0.0.0` と `--port $PORT` は必須です。既定の `127.0.0.1:8000` のままだと
-コンテナ外から届かず、ヘルスチェックが通らずデプロイが失敗します。
+オプションは要りません。`serve` は環境変数 `PORT` があればそれを使い、
+外部から届くように `0.0.0.0` で待ち受けます (Render / Heroku / Cloud Run など、
+待ち受けポートを `PORT` で渡す環境向け)。`PORT` が無い手元の環境では
+従来どおり `127.0.0.1:8000` です。
 
-Start Command は uvicorn を直接呼んでも同じです。
-
-```
-uvicorn wbsgen.web.app:app --host 0.0.0.0 --port $PORT
-```
+明示したい場合は `--host` / `--port`、または環境変数 `HOST` / `PORT` で
+上書きできます。
 
 このアプリには認証がありません。デプロイすると URL を知っている人は誰でも
 開けるので、社内向けであればアクセス制限を別途かけてください。

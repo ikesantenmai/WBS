@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import os
 import sys
 from pathlib import Path
 
@@ -49,11 +50,20 @@ def main(argv=None) -> int:
                       help="日本の祝日を休日として扱わない")
     make.set_defaults(func=_cmd_new)
 
-    serve = sub.add_parser("serve", help="Web アプリケーションを起動する")
-    serve.add_argument("--host", default="127.0.0.1", help="待ち受けホスト (既定: 127.0.0.1)")
-    serve.add_argument("--port", type=int, default=8000, help="待ち受けポート (既定: 8000)")
+    host, port, hosted = _serve_defaults()
+    serve = sub.add_parser(
+        "serve",
+        help="Web アプリケーションを起動する",
+        description="環境変数 PORT があればそれを使い、外部から届くように "
+                    "0.0.0.0 で待ち受けます (Render などの PaaS 向け)。"
+                    "そのため、そうした環境では引数なしの `wbsgen serve` だけで動きます。",
+    )
+    serve.add_argument("--host", default=host,
+                       help=f"待ち受けホスト (既定: {host}。環境変数 HOST でも指定できます)")
+    serve.add_argument("--port", type=int, default=port,
+                       help=f"待ち受けポート (既定: {port}。環境変数 PORT でも指定できます)")
     serve.add_argument("--reload", action="store_true", help="コード変更時に自動再起動する")
-    serve.set_defaults(func=_cmd_serve)
+    serve.set_defaults(func=_cmd_serve, hosted=hosted)
 
     args = parser.parse_args(argv)
     try:
@@ -102,6 +112,24 @@ def _workdays(text):
     return [part.strip() for part in str(text).replace("、", ",").split(",") if part.strip()]
 
 
+def _serve_defaults():
+    """待ち受け先の既定値を決める。
+
+    PaaS (Render / Heroku / Cloud Run など) は待ち受けポートを環境変数 ``PORT``
+    で渡してくる。その場合は ``0.0.0.0`` で待ち受けないと外部から届かないので、
+    ホストの既定も切り替える。手元で動かすときは従来どおり ``127.0.0.1``。
+    """
+    raw = os.environ.get("PORT")
+    hosted = bool(raw)
+    try:
+        port = int(raw) if raw else 8000
+    except ValueError:
+        port = 8000
+        hosted = False
+    host = os.environ.get("HOST") or ("0.0.0.0" if hosted else "127.0.0.1")
+    return host, port, hosted
+
+
 def _cmd_serve(args) -> int:
     try:
         from .web import serve
@@ -109,7 +137,12 @@ def _cmd_serve(args) -> int:
         print("エラー: Web アプリには追加の依存が必要です。"
               "\n  pip install 'wbsgen[web]'", file=sys.stderr)
         return 2
-    print(f"起動しました: http://{args.host}:{args.port}/  (Ctrl+C で終了)")
+
+    if getattr(args, "hosted", False) and args.host == "0.0.0.0":
+        print(f"起動しました: ポート {args.port} で待ち受けます "
+              f"(環境変数 PORT を検出。Ctrl+C で終了)")
+    else:
+        print(f"起動しました: http://{args.host}:{args.port}/  (Ctrl+C で終了)")
     serve(host=args.host, port=args.port, reload=args.reload)
     return 0
 
