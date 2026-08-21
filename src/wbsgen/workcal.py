@@ -68,6 +68,30 @@ class WorkCalendar:
     def is_holiday(self, day: _dt.date) -> bool:
         return not self.is_workday(day)
 
+    def next_workday(self, day: _dt.date) -> _dt.date:
+        """``day`` 以降 (``day`` を含む) で最初の稼働日。"""
+        step = _dt.timedelta(days=1)
+        for _ in range(3660):
+            if self.is_workday(day):
+                return day
+            day += step
+        raise ValueError("稼働日が 10 年以上見つかりません。稼働曜日の設定を確認してください。")
+
+    def end_date(self, start: _dt.date, workdays: int) -> _dt.date:
+        """``start`` を 1 日目として ``workdays`` 稼働日目にあたる日付。
+
+        WBS の「日数」は暦日ではなく稼働日なので、終了日が書かれていない行の
+        バーを描くときにこれで補う。
+        """
+        day = self.next_workday(start)
+        remaining = max(workdays, 1) - 1
+        step = _dt.timedelta(days=1)
+        while remaining > 0:
+            day += step
+            if self.is_workday(day):
+                remaining -= 1
+        return day
+
     def holidays_between(self, start: _dt.date, end: _dt.date) -> "list[_dt.date]":
         """期間内の休日 (設定シートに載せる一覧)。"""
         out = []

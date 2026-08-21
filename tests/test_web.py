@@ -24,7 +24,7 @@ SPEC = {"start": "2026-02-01", "end": "2027-01-31", "unit": "week", "rows": 40}
 def test_index_serves_the_app_shell(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert "空の WBS を作る" in response.text
+    assert "WBS ジェネレータ" in response.text
     assert "/static/app.js" in response.text
 
 
@@ -125,3 +125,71 @@ def test_build_filename_carries_the_title(client):
 
 def test_build_rejects_bad_input(client):
     assert client.post("/api/build", json={"start": "bad"}).status_code == 422
+
+
+# ---------------------------------------------------------------- import
+def _upload(client, path, name="filled.xlsx", params=None):
+    with open(path, "rb") as handle:
+        return client.post("/api/import", params=params or {}, files={
+            "file": (name, handle.read(),
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        })
+
+
+def test_import_returns_a_chart(client, filled_book):
+    body = _upload(client, filled_book).json()
+    assert body["title"] == "2026年度 開発スケジュール"
+    assert len(body["rows"]) == 5
+    assert body["timeline"]["unit"] == "week"
+    assert body["totals"]["done"] == 2
+    assert body["rows"][0]["plan"]["x2"] > body["rows"][0]["plan"]["x1"]
+
+
+@pytest.mark.parametrize("unit,columns", [("day", 365), ("week", 53), ("month", 12)])
+def test_import_can_override_the_unit(client, filled_book, unit, columns):
+    body = _upload(client, filled_book, params={"unit": unit}).json()
+    assert body["timeline"]["unit"] == unit
+    assert len(body["timeline"]["columns"]) == columns
+
+
+def test_import_rejects_an_unknown_unit(client, filled_book):
+    response = _upload(client, filled_book, params={"unit": "hour"})
+    assert response.status_code == 422
+    assert "表示単位" in response.json()["detail"]
+
+
+def test_import_rejects_a_non_excel_file(client):
+    response = client.post("/api/import", files={"file": ("notes.txt", b"hello", "text/plain")})
+    assert response.status_code == 415
+    assert "対応していない形式" in response.json()["detail"]
+
+
+def test_import_rejects_a_broken_file(client):
+    response = client.post("/api/import", files={"file": ("broken.xlsx", b"nope", "x")})
+    assert response.status_code == 422
+    assert "Excel として読めません" in response.json()["detail"]
+
+
+def test_import_rejects_an_empty_workbook(client, tmp_path):
+    """記入されていない空の WBS を読ませたら、その旨を返す。"""
+    from wbsgen.blank import build as build_spec
+    from wbsgen.workbook import write as write_book
+
+    path = tmp_path / "blank.xlsx"
+    write_book(build_spec(dt.date(2026, 4, 1), months=3, rows=10), path)
+    response = _upload(client, path, name="blank.xlsx")
+    assert response.status_code == 422
+    assert "記入された行が見つかりません" in response.json()["detail"]
+
+
+def test_import_reports_unreadable_rows(client, make_filled):
+    import openpyxl
+
+    path = make_filled("bad.xlsx")
+    book = openpyxl.load_workbook(path)
+    book["スケジュール"]["F6"] = "来週くらい"
+    book.save(path)
+
+    body = _upload(client, path, name="bad.xlsx").json()
+    assert len(body["rows"]) == 4
+    assert any("6 行目" in w for w in body["warnings"])

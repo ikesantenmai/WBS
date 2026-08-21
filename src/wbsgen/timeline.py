@@ -99,6 +99,34 @@ class Timeline:
         return len(self.columns)
 
     # ------------------------------------------------------------------
+    # 日付の位置
+    # ------------------------------------------------------------------
+    def position(self, day: _dt.date, end_of_day: bool = False) -> float:
+        """日付を「列単位の連続座標」に写像する。
+
+        戻り値 ``2.5`` は 3 列目の中央を意味する。範囲外はクランプする。
+        ``end_of_day`` が真なら、その日の終端 (翌日の始点) を返す。
+        """
+        if not self.columns:
+            return 0.0
+        if day < self.start:
+            return 0.0
+        if day > self.end:
+            return float(len(self.columns))
+        for col in self.columns:
+            if col.start <= day <= col.end:
+                offset = (day - col.start).days + (1 if end_of_day else 0)
+                return col.index + offset / col.days
+        return float(len(self.columns))
+
+    def clamp(self, day: _dt.date) -> _dt.date:
+        return min(max(day, self.start), self.end)
+
+    def overlaps(self, start: _dt.date, end: _dt.date) -> bool:
+        """期間が表示範囲にかかっているか。"""
+        return not (end < self.start or start > self.end)
+
+    # ------------------------------------------------------------------
     # 見出し
     # ------------------------------------------------------------------
     @property

@@ -7,21 +7,25 @@
 from __future__ import annotations
 
 import datetime as _dt
+import io
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import quote
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
+from ..chart import build as build_chart
+from ..importer import read as read_workbook
 from ..timeline import VALID_UNITS, Timeline
 from ..workcal import WEEKDAY_JP, WEEKDAY_KEYS
 
 STATIC_DIR = Path(__file__).parent / "static"
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
 app = FastAPI(
     title="wbsgen",
@@ -123,6 +127,45 @@ def _filename(spec: BlankWBS) -> str:
 
 
 # ----------------------------------------------------------------------
+@app.post("/api/import")
+async def import_workbook(
+    file: UploadFile = File(...),
+    unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
+) -> Dict[str, Any]:
+    """記入済みの Excel を読み込み、ガントチャートの描画モデルを返す。
+
+    ``unit`` を渡すと、ファイルに書かれた表示単位より優先する
+    (同じ内容を日/週/月で見比べるため)。
+    """
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="ファイルが大きすぎます (上限 8MB)")
+
+    name = Path(file.filename or "wbs.xlsx").name
+    if Path(name).suffix.lower() not in (".xlsx", ".xlsm"):
+        raise HTTPException(
+            status_code=415,
+            detail=f"対応していない形式です: {Path(name).suffix or '(拡張子なし)'}"
+                   " — .xlsx を指定してください",
+        )
+    try:
+        imported = read_workbook(io.BytesIO(raw), filename=name)
+    except SpecError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    if unit:
+        if unit not in VALID_UNITS:
+            raise HTTPException(status_code=422, detail=f"表示単位が不正です: {unit}")
+        imported.spec.unit = unit
+
+    if not imported.rows:
+        raise HTTPException(
+            status_code=422,
+            detail="記入された行が見つかりません。項目と日付を入れてから読み込んでください。",
+        )
+    return build_chart(imported)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))

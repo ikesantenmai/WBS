@@ -95,10 +95,14 @@ def _reset(page):
 
 
 # ----------------------------------------------------------------------
+def _months(page):
+    return [m for m in page.eval_on_selector_all(
+        "svg.chart-head text[font-weight='700']", "n => n.map(x => x.textContent)") if m]
+
+
 def test_preview_renders_the_sheet(page):
     _reset(page)
-    months = page.eval_on_selector_all("th.month", "n => n.map(x => x.textContent)")
-    assert [m for m in months if m][:3] == ["4月", "5月", "6月"]
+    assert _months(page)[:3] == ["4月", "5月", "6月"]
     assert page.eval_on_selector_all("table.wbs tbody tr", "n => n.length") > 10
     assert "空行" in page.text_content("#preview-info")
     assert page.errors == []
@@ -118,15 +122,13 @@ def test_month_field_is_hidden_until_selected(page):
 def test_changing_the_unit_redraws_the_axis(page):
     _reset(page)
     page.select_option("#unit", "day")
-    page.wait_for_function(
-        "() => document.querySelectorAll('table.wbs thead tr').length === 3")
-    weekdays = page.eval_on_selector_all(
-        "table.wbs thead tr:nth-child(3) th", "n => n.map(x => x.textContent)")
-    assert "土" in weekdays and "日" in weekdays
+    page.wait_for_selector("svg.chart-head[data-unit=day]")
+    labels = page.eval_on_selector_all(
+        "svg.chart-head text", "n => n.map(x => x.textContent)")
+    assert "土" in labels and "日" in labels        # 曜日の行が出る
 
     page.select_option("#unit", "week")
-    page.wait_for_function(
-        "() => document.querySelectorAll('table.wbs thead tr').length === 2")
+    page.wait_for_selector("svg.chart-head[data-unit=week]")
     assert page.errors == []
 
 
@@ -175,4 +177,60 @@ def test_downloading_the_workbook(page, tmp_path):
     download.value.save_as(saved)
     assert saved.stat().st_size > 8000
     assert download.value.suggested_filename.endswith(".xlsx")
+    assert page.errors == []
+
+
+# ---------------------------------------------------------------- 読み込み
+def test_importing_a_workbook_draws_a_gantt_chart(page, filled_book):
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+    # 表に記入内容が並ぶ
+    first = page.eval_on_selector_all(
+        "table.wbs tbody tr:first-child td", "n => n.map(x => x.textContent)")
+    assert "要件定義" in first
+    assert "完了" in first
+
+    # チャートにバーと現在日線が描かれる
+    assert page.eval_on_selector_all(
+        "svg.chart-body rect[rx='2']", "n => n.length") >= 8
+    assert page.eval_on_selector_all(
+        "svg.chart-body line[stroke-dasharray]", "n => n.length") == 1
+
+    # 集計が出て、指定フォームは畳まれる
+    assert "行数" in page.text_content("#totals")
+    assert page.is_hidden("#spec-form")
+    assert page.errors == []
+
+
+def test_the_chart_unit_can_be_switched(page, filled_book):
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_selector("svg.chart-head[data-unit=week]")
+
+    page.select_option("#chart-unit", "month")
+    page.wait_for_selector("svg.chart-head[data-unit=month]")
+    assert _months(page)[:2] == ["2026年", "2027年"]
+
+    page.select_option("#chart-unit", "day")
+    page.wait_for_selector("svg.chart-head[data-unit=day]")
+    assert page.errors == []
+
+
+def test_going_back_restores_the_form(page, filled_book):
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_selector("#btn-back:not([hidden])")
+    page.click("#btn-back")
+    page.wait_for_selector("#spec-form:not([hidden])")
+    assert page.is_visible("#period-section")
+    assert page.is_hidden("#totals")
+    assert page.errors == []
+
+
+def test_importing_a_non_excel_file_shows_a_message(page, tmp_path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    page.set_input_files("#import-file", str(path))
+    page.wait_for_selector("#banner:not([hidden])")
+    assert "対応していない形式" in page.text_content("#banner")
     assert page.errors == []
