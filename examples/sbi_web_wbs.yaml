@@ -1,0 +1,172 @@
+# ======================================================================
+# 添付の WBS (SBI証券様／WEB口座開設刷新PJ) を wbsgen の定義に起こしたもの。
+#   wbsgen build examples/sbi_web_wbs.yaml -o out/sbi.xlsx
+# ======================================================================
+project:
+  title: "SBI証券様／WEB口座開設刷新PJシステム開発　開発/テスト スケジュール"
+  updated_at: 2026-08-07 19:34
+
+chart:
+  start: 2026-02-01
+  period_days: 360
+  unit: week
+  base_date: 2026-08-07      # 元ファイルの更新日時に合わせた現在日
+  man_month_days: 20
+  thresholds:
+    exec_remain_days: 5
+    start_near_days: 10
+  show:
+    results: true
+    progress: false
+    manpower: true
+    status: true
+    start_date: true
+    end_date: true
+    predecessor: false
+    predecessor_line: false
+    now_line: true
+    inazuma_line: true
+    member_color: true
+
+calendar:
+  workdays: [mon, tue, wed, thu, fri]
+  japanese_holidays: true
+  # 元ファイルは 2007 年当時の祝日テーブルのままで 2026-12-23 を天皇誕生日
+  # (休日) として扱っている。現行法では平日なので既定では休日にしない。
+  # 元ファイルの値をそのまま再現したい場合は次の行を有効にする。
+  # holidays: [2026-12-23]
+
+members:
+  - { name: DS,     color: "#4472C4" }
+  - { name: DS開発, color: "#70AD47" }
+  - { name: SBI/DS, color: "#ED7D31" }
+
+tasks:
+  - { group: "開発", subgroup: "環境構築", "no": "101", name: "開発環境", start: 2026-04-13, days: 31, actual_start: 2026-04-13, actual_days: 75, actual_end: 2026-07-31, progress: 1, member: "DS" }
+  - { "no": "102", name: "本番環境", start: 2026-10-01, days: 40, progress: 0, member: "DS" }
+  - { subgroup: "詳細設計", "no": "111", name: "WEB口座開設システム_画像管理（API）", start: 2026-04-03, days: 16, actual_start: 2026-04-03, actual_days: 16, actual_end: 2026-04-24, progress: 1, member: "DS開発" }
+  - { "no": "112", name: "WEB口座開設システム_撮影補助", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 26, actual_end: 2026-05-15, progress: 1, member: "DS開発" }
+  - { "no": "113", name: "WEB口座開設システム_管理画面" }
+  - { name: "　新規口座開設", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 40, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { name: "　未成年口座開設", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 40, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { name: "　外国籍口座開設", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 40, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { name: "　未成年外国籍口座開設", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 40, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { name: "　管理者画面", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 26, actual_end: 2026-05-15, progress: 1, member: "DS開発" }
+  - { "no": "114", name: "WEB口座開設システム_データ取込、連携バッチ" }
+  - { name: "　取り込みバッチ", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 26, actual_end: 2026-05-15, progress: 1, member: "DS開発" }
+  - { name: "　連携バッチ", start: 2026-04-03, days: 27, actual_start: 2026-04-06, actual_days: 40, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { "no": "115", name: "D-Confia_API機能", start: 2026-04-02, days: 20, actual_start: 2026-04-02, actual_days: 19, actual_end: 2026-04-29, progress: 1, member: "DS開発" }
+  - { "no": "116", name: "D-Confia_SDK機能", start: 2026-04-03, days: 11, actual_start: 2026-04-03, actual_days: 67, actual_end: 2026-07-10, progress: 1, member: "DS開発" }
+  - { subgroup: "製造", "no": "121", name: "WEB口座開設システム_画像管理（API）" }
+  - { name: "　共通", start: 2026-04-10, days: 10, actual_start: 2026-04-10, actual_days: 11, actual_end: 2026-04-25, progress: 1, member: "DS開発" }
+  - { name: "　成人向け", start: 2026-04-10, days: 10, actual_start: 2026-04-10, actual_days: 11, actual_end: 2026-04-25, progress: 1, member: "DS開発" }
+  - { name: "　未成年向け", start: 2026-04-10, days: 10, actual_start: 2026-04-10, actual_days: 11, actual_end: 2026-04-25, progress: 1, member: "DS開発" }
+  - { "no": "122", name: "WEB口座開設システム_撮影補助", start: 2026-05-18, days: 10, actual_start: 2026-05-19, actual_days: 24, actual_end: 2026-06-19, progress: 1, member: "DS開発" }
+  - { "no": "123", name: "WEB口座開設システム_管理画面" }
+  - { name: "　新規口座開設", start: 2026-05-18, days: 27, actual_start: 2026-05-08, actual_days: 60, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　未成年口座開設", start: 2026-05-18, days: 27, actual_start: 2026-05-08, actual_days: 60, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　外国籍口座開設", start: 2026-05-18, days: 27, actual_start: 2026-05-08, actual_days: 60, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　未成年外国籍口座開設", start: 2026-05-18, days: 27, actual_start: 2026-05-08, actual_days: 60, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　管理者画面", start: 2026-05-18, days: 27, actual_start: 2026-05-08, actual_days: 43, actual_end: 2026-07-07, progress: 1, member: "DS開発" }
+  - { "no": "124", name: "WEB口座開設システム_データ取込、連携バッチ" }
+  - { name: "　取り込みバッチ", start: 2026-05-08, days: 35, actual_start: 2026-05-08, actual_days: 46, actual_end: 2026-07-10, progress: 1, member: "DS開発" }
+  - { name: "　連携バッチ", start: 2026-05-08, days: 35, actual_start: 2026-05-08, actual_days: 60, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { "no": "125", name: "D-Confia_API機能", start: 2026-04-20, days: 31, actual_start: 2026-04-17, actual_days: 24, actual_end: 2026-05-26, progress: 1, member: "DS開発" }
+  - { "no": "126", name: "D-Confia_SDK機能_Andoroid（スタブ版）", start: 2026-06-01, days: 28, actual_start: 2026-06-05, actual_days: 26, actual_end: 2026-07-10, progress: 1, member: "DS開発" }
+  - { "no": "127", name: "D-Confia_SDK機能_Andoroid", start: 2026-04-20, days: 38, actual_start: 2026-05-07, actual_days: 66, progress: 0.95, member: "DS開発" }
+  - { "no": "128", name: "D-Confia_SDK機能_iOS（スタブ版）", start: 2026-06-08, days: 25, actual_start: 2026-06-08, actual_days: 25, actual_end: 2026-07-10, progress: 1, member: "DS開発" }
+  - { "no": "129", name: "D-Confia_SDK機能_iOS", start: 2026-05-01, days: 52, actual_start: 2026-06-08, actual_days: 32, actual_end: 2026-07-22, progress: 1, member: "DS開発" }
+  - { subgroup: "テスト", "no": "131", name: "WEB口座開設システム_画像管理（API）" }
+  - { name: "　共通", start: 2026-04-17, days: 60, actual_start: 2026-04-17, actual_days: 31, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { name: "　成人向け", start: 2026-04-17, days: 60, actual_start: 2026-04-17, actual_days: 31, actual_end: 2026-06-04, progress: 1, member: "DS開発" }
+  - { name: "　未成年向け", start: 2026-04-17, days: 60, actual_start: 2026-04-17, actual_days: 48, actual_end: 2026-06-29, progress: 1, member: "DS開発" }
+  - { "no": "132", name: "WEB口座開設システム_撮影補助", start: 2026-06-15, days: 22, actual_start: 2026-06-15, actual_days: 34, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { "no": "133", name: "WEB口座開設システム_管理画面" }
+  - { name: "　新規口座開設", start: 2026-07-08, days: 17, actual_start: 2026-07-08, actual_days: 17, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　未成年口座開設", start: 2026-07-08, days: 17, actual_start: 2026-07-08, actual_days: 17, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　外国籍口座開設", start: 2026-07-08, days: 17, actual_start: 2026-07-08, actual_days: 17, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　未成年外国籍口座開設", start: 2026-07-08, days: 17, actual_start: 2026-07-08, actual_days: 17, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　管理者画面", start: 2026-07-08, days: 17, actual_start: 2026-07-08, actual_days: 17, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { "no": "134", name: "WEB口座開設システム_データ取込、連携バッチ" }
+  - { name: "　取り込みバッチ", start: 2026-07-08, days: 17, actual_start: 2026-07-08, actual_days: 17, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { name: "　連携バッチ", start: 2026-07-08, days: 17, actual_start: 2026-07-27, actual_days: 5, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { "no": "135", name: "D-Confia_API機能", start: 2026-05-25, days: 49, actual_start: 2026-05-25, actual_days: 49, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { "no": "136", name: "D-Confia_SDK機能_Andoroid", start: 2026-06-17, days: 10, actual_start: 2026-07-01, actual_days: 22, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { "no": "137", name: "D-Confia_SDK機能_iOS", start: 2026-07-17, days: 10, actual_start: 2026-07-27, actual_days: 5, actual_end: 2026-07-31, progress: 1, member: "DS開発" }
+  - { subgroup: "なりすまし対応", "no": "141", name: "WEB口座開設システム_画像管理（API）", start: 2026-07-11, days: 34, actual_start: 2026-07-13, actual_days: 19, progress: 0.1, member: "DS開発" }
+  - { "no": "142", name: "WEB口座開設システム_撮影補助", start: 2026-07-11, days: 34, actual_start: 2026-07-13, actual_days: 19, progress: 0.05, member: "DS開発" }
+  - { subgroup: "追加対応②", "no": "151", name: "WEB口座開設システム_画像管理（API）", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS開発" }
+  - { "no": "152", name: "WEB口座開設システム_管理画面", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS開発" }
+  - { "no": "153", name: "WEB口座開設システム_データ取込、連携バッチ", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS開発" }
+  - { subgroup: "追加対応③", "no": "161", name: "属性一括ファイルの「FATCACRS」に出力項目を追加", start: 2026-08-10, days: 15, progress: 0, member: "DS開発" }
+  - { subgroup: "追加開発", "no": "171", name: "WEB口座開設システム_データ取込、連携バッチ", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS開発" }
+  - { group: "テスト作成", subgroup: "テスト計画", "no": "201", name: "テスト計画書", start: 2026-04-01, days: 39, actual_start: 2026-04-08, actual_days: 39, actual_end: 2026-06-05, progress: 1, member: "DS" }
+  - { subgroup: "内部結合（ＩＴａ）", "no": "211", name: "WEB口座開設システム_画像管理（API）" }
+  - { name: "　共通", start: 2026-05-18, days: 10, actual_start: 2026-05-18, actual_days: 8, actual_end: 2026-05-27, progress: 1, member: "DS" }
+  - { name: "　成人向け", start: 2026-05-18, days: 10, actual_start: 2026-05-18, actual_days: 8, actual_end: 2026-05-27, progress: 1, member: "DS" }
+  - { name: "　未成年向け", start: 2026-05-18, days: 10, actual_start: 2026-05-18, actual_days: 10, actual_end: 2026-05-29, progress: 1, member: "DS" }
+  - { "no": "212", name: "WEB口座開設システム_撮影補助", start: 2026-05-18, days: 10, actual_start: 2026-05-22, actual_days: 3, actual_end: 2026-05-26, progress: 1, member: "DS" }
+  - { "no": "213", name: "WEB口座開設システム_管理画面" }
+  - { name: "　新規口座開設", start: 2026-04-14, days: 33, actual_start: 2026-04-14, actual_days: 52, actual_end: 2026-06-30, progress: 1, member: "DS" }
+  - { name: "　未成年口座開設", start: 2026-04-14, days: 33, actual_start: 2026-04-14, actual_days: 52, actual_end: 2026-06-30, progress: 1, member: "DS" }
+  - { name: "　外国籍口座開設", start: 2026-04-14, days: 33, actual_start: 2026-04-14, actual_days: 52, actual_end: 2026-06-30, progress: 1, member: "DS" }
+  - { name: "　未成年外国籍口座開設", start: 2026-04-14, days: 33, actual_start: 2026-04-14, actual_days: 52, actual_end: 2026-06-30, progress: 1, member: "DS" }
+  - { name: "　管理者画面", start: 2026-04-14, days: 33, actual_start: 2026-04-14, actual_days: 52, actual_end: 2026-06-30, progress: 1, member: "DS" }
+  - { "no": "214", name: "WEB口座開設システム_データ取込、連携バッチ" }
+  - { name: "　取り込みバッチ", start: 2026-05-12, days: 27, actual_start: 2026-05-12, actual_days: 17, actual_end: 2026-06-03, progress: 1, member: "DS" }
+  - { name: "　連携バッチ", start: 2026-05-12, days: 27, actual_start: 2026-05-12, actual_days: 28, actual_end: 2026-06-18, progress: 1, member: "DS" }
+  - { "no": "215", name: "D-Confia_API機能", start: 2026-07-01, days: 15, actual_start: 2026-06-10, actual_days: 30, actual_end: 2026-07-22, progress: 1, member: "DS" }
+  - { "no": "216", name: "D-Confia_SDK機能_Andoroid", start: 2026-07-01, days: 22, actual_start: 2026-07-01, actual_days: 22, actual_end: 2026-07-31, progress: 1, member: "DS" }
+  - { "no": "217", name: "D-Confia_SDK機能_iOS", start: 2026-07-01, days: 22, actual_start: 2026-07-01, actual_days: 22, actual_end: 2026-07-31, progress: 1, member: "DS" }
+  - { subgroup: "外部結合（ＩＴb）", "no": "221", name: "シナリオテスト", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 2, actual_end: 2026-07-13, progress: 1, member: "DS" }
+  - { "no": "222", name: "性能要件テスト", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 1, actual_end: 2026-07-10, progress: 1, member: "DS" }
+  - { "no": "223", name: "負荷要件テスト", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 1, actual_end: 2026-07-10, progress: 1, member: "DS" }
+  - { "no": "224", name: "システム運用テスト", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 5, actual_end: 2026-07-16, progress: 1, member: "DS" }
+  - { "no": "225", name: "システム監視テスト", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 19, actual_end: 2026-08-06, progress: 1, member: "DS" }
+  - { "no": "231", name: "性能要件テスト(D-Confia)", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 19, actual_end: 2026-08-06, progress: 1, member: "DS" }
+  - { "no": "232", name: "負荷要件テスト(D-Confia)", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 19, actual_end: 2026-08-06, progress: 1, member: "DS" }
+  - { "no": "233", name: "セキュリティ要件テスト(D-Confia)", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 19, actual_end: 2026-08-06, progress: 1, member: "DS" }
+  - { "no": "234", name: "システム運用テスト(D-Confia)", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 19, actual_end: 2026-08-06, progress: 1, member: "DS" }
+  - { "no": "235", name: "システム監視テスト(D-Confia)", start: 2026-07-10, days: 20, actual_start: 2026-07-10, actual_days: 19, actual_end: 2026-08-06, progress: 1, member: "DS" }
+  - { subgroup: "なりすまし対応", "no": "241", name: "WEB口座開設システム_画像管理（API）", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS" }
+  - { "no": "242", name: "WEB口座開設システム_撮影補助", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS" }
+  - { subgroup: "追加対応②", "no": "251", name: "WEB口座開設システム_画像管理（API）", start: 2026-08-03, days: 20, actual_start: 2026-07-29, actual_days: 8, progress: 0.1, member: "DS" }
+  - { "no": "252", name: "WEB口座開設システム_管理画面", start: 2026-08-03, days: 20, actual_start: 2026-07-29, actual_days: 8, progress: 0.1, member: "DS" }
+  - { "no": "253", name: "WEB口座開設システム_データ取込、連携バッチ", start: 2026-08-03, days: 20, actual_start: 2026-07-29, actual_days: 8, progress: 0.1, member: "DS" }
+  - { subgroup: "追加対応③", "no": "261", name: "属性一括ファイルの「FATCACRS」に出力項目を追加", start: 2026-08-10, days: 15, progress: 0, member: "DS" }
+  - { subgroup: "追加開発", "no": "271", name: "WEB口座開設システム_データ取込、連携バッチ", start: 2026-08-03, days: 20, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS" }
+  - { group: "テスト実施", subgroup: "内部結合（ＩＴａ）", "no": "301", name: "WEB口座開設システム_画像管理（API）" }
+  - { name: "　共通", start: 2026-08-03, days: 5, actual_start: 2026-08-03, actual_days: 5, progress: 0.8, member: "DS" }
+  - { name: "　成人向け", start: 2026-08-03, days: 5, actual_start: 2026-08-03, actual_days: 5, progress: 0.8, member: "DS" }
+  - { name: "　未成年向け", start: 2026-08-03, days: 5, actual_start: 2026-08-03, actual_days: 5, progress: 0.8, member: "DS" }
+  - { "no": "302", name: "WEB口座開設システム_撮影補助", start: 2026-08-17, days: 10, progress: 0, member: "DS" }
+  - { "no": "303", name: "WEB口座開設システム_管理画面" }
+  - { name: "　新規口座開設", start: 2026-08-11, days: 13, actual_start: 2026-08-03, actual_days: 5, progress: 0.9, member: "DS" }
+  - { name: "　未成年口座開設", start: 2026-08-11, days: 13, actual_start: 2026-08-03, actual_days: 5, progress: 0.06, member: "DS" }
+  - { name: "　外国籍口座開設", start: 2026-08-11, days: 13, actual_start: 2026-08-03, actual_days: 5, progress: 0.2, member: "DS" }
+  - { name: "　未成年外国籍口座開設", start: 2026-08-11, days: 13, actual_start: 2026-08-03, actual_days: 5, progress: 0.16, member: "DS" }
+  - { name: "　管理者画面", start: 2026-08-20, days: 7, actual_start: 2026-08-03, actual_days: 5, progress: 0.67, member: "DS" }
+  - { "no": "304", name: "WEB口座開設システム_データ取込、連携バッチ" }
+  - { name: "　取り込みバッチ", start: 2026-08-17, days: 10, actual_start: 2026-08-03, actual_days: 5, progress: 0, member: "DS" }
+  - { name: "　連携バッチ", start: 2026-08-17, days: 10, progress: 0, member: "DS" }
+  - { "no": "305", name: "D-Confia_API機能", start: 2026-08-03, days: 34, actual_start: 2026-08-04, actual_days: 4, progress: 0, member: "DS" }
+  - { "no": "306", name: "D-Confia_SDK機能_Andoroid", start: 2026-08-03, days: 20, actual_start: 2026-08-04, actual_days: 4, progress: 0, member: "DS" }
+  - { "no": "307", name: "D-Confia_SDK機能_iOS", start: 2026-08-20, days: 22, progress: 0, member: "DS" }
+  - { subgroup: "なりすまし対応", "no": "311", name: "WEB口座開設システム_画像管理（API）", start: 2026-09-01, days: 12, progress: 0, member: "DS" }
+  - { "no": "312", name: "WEB口座開設システム_撮影補助", start: 2026-09-01, days: 12, progress: 0, member: "DS" }
+  - { subgroup: "追加対応②", "no": "321", name: "WEB口座開設システム_画像管理（API）", start: 2026-09-01, days: 12, progress: 0, member: "DS" }
+  - { "no": "322", name: "WEB口座開設システム_管理画面", start: 2026-09-01, days: 12, progress: 0, member: "DS" }
+  - { "no": "323", name: "WEB口座開設システム_データ取込、連携バッチ", start: 2026-09-01, days: 12, progress: 0, member: "DS" }
+  - { subgroup: "追加対応③", "no": "331", name: "属性一括ファイルの「FATCACRS」に出力項目を追加", start: 2026-09-01, days: 5, progress: 0, member: "DS" }
+  - { subgroup: "追加開発", "no": "341", name: "WEB口座開設システム_データ取込、連携バッチ", start: 2026-09-01, days: 12, progress: 0, member: "DS" }
+  - { subgroup: "外部結合（Itb）", "no": "400", name: "シナリオテスト", start: 2026-09-21, days: 12, progress: 0, member: "DS" }
+  - { "no": "401", name: "非機能要件テスト", start: 2026-09-21, days: 12, progress: 0, member: "DS" }
+  - { group: "リハーサル", subgroup: "リハーサル", "no": "501", name: "WEB口座開設システム", start: 2026-11-30, days: 20, progress: 0, member: "DS" }
+  - { "no": "502", name: "D-Confia_基本機能", start: 2026-11-30, days: 20, progress: 0, member: "DS" }
+  - { group: "運用ドキュメント", subgroup: "運用ドキュメント", "no": "601", name: "運用設計書", start: 2026-09-17, days: 18, progress: 0, member: "DS" }
+  - { "no": "602", name: "運用手順書", start: 2026-09-17, days: 18, progress: 0, member: "DS" }
+  - { group: "SLA", subgroup: "SLA", "no": "701", name: "SLA（ドラフト版）", start: 2026-08-10, days: 15, progress: 0, member: "DS" }
+  - { "no": "702", name: "SLA　締結", start: 2026-09-01, days: 30, progress: 0, member: "SBI/DS" }
+  - { group: "マニュアル", subgroup: "マニュアル作成", "no": "801", name: "審査画面マニュアルの作成", start: 2026-10-19, days: 15, progress: 0, member: "DS" }
+  - { group: "リリース", subgroup: "リリース", "no": "501", name: "WEB口座開設システム", start: 2027-01-11, days: 9, progress: 0, member: "DS" }
+  - { "no": "502", name: "D-Confia_基本機能", start: 2027-01-11, days: 5, progress: 0, member: "DS" }
