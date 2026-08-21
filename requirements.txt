@@ -1,0 +1,3 @@
+# Render など、requirements.txt を見てビルドする環境向け。
+# このリポジトリ自身を Web アプリの依存 (FastAPI / uvicorn) 付きで入れる。
+.[web]

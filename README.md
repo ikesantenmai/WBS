@@ -151,6 +151,29 @@ curl -X POST http://127.0.0.1:8000/api/build \
 
 ---
 
+## Render にデプロイする
+
+Web Service を作り、次の 2 つを設定します。
+
+| 項目 | 値 |
+|------|-----|
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `wbsgen serve --host 0.0.0.0 --port $PORT` |
+
+`--host 0.0.0.0` と `--port $PORT` は必須です。既定の `127.0.0.1:8000` のままだと
+コンテナ外から届かず、ヘルスチェックが通らずデプロイが失敗します。
+
+Start Command は uvicorn を直接呼んでも同じです。
+
+```
+uvicorn wbsgen.web.app:app --host 0.0.0.0 --port $PORT
+```
+
+このアプリには認証がありません。デプロイすると URL を知っている人は誰でも
+開けるので、社内向けであればアクセス制限を別途かけてください。
+
+---
+
 ## 開発
 
 ```bash
