@@ -41,7 +41,7 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
         "timeline": _timeline(timeline),
         "rows": rows,
         "members": [{"name": name, "color": color} for name, color in colors.items()],
-        "totals": _totals(imported.rows),
+        "totals": _totals(rows),
     }
 
 
@@ -137,24 +137,28 @@ def _status_color(status: str):
     return None, None
 
 
-def _totals(rows: List[Row]) -> Dict[str, Any]:
-    planned = [r for r in rows if r.has_plan or r.start]
-    done = [r for r in rows if r.progress is not None and r.progress >= 1.0]
-    running = [r for r in rows if r.has_actual
-               and not (r.progress is not None and r.progress >= 1.0)]
-    starts = [r.start for r in rows if r.start]
-    ends = [r.end for r in rows if r.end]
-    weight = sum(r.days or 1 for r in planned) or 1
+def _totals(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """描画済みの行から集計する。
+
+    終了日は補ったものを使う (画面に描いたバーと期間を一致させるため)。
+    """
+    planned = [r for r in rows if r["start"]]
+    done = [r for r in rows if r["progress"] is not None and r["progress"] >= 1.0]
+    running = [r for r in rows if r["actual_start"]
+               and not (r["progress"] is not None and r["progress"] >= 1.0)]
+    starts = [r["start"] for r in rows if r["start"]]
+    ends = [r["end"] for r in rows if r["end"]]
+    weight = sum(r["days"] or 1 for r in planned) or 1
     return {
         "rows": len(rows),
         "done": len(done),
         "running": len(running),
-        "delayed": len([r for r in rows if r.delay]),
-        "effort": round(sum(r.effort or 0 for r in rows), 1),
+        "delayed": len([r for r in rows if r["delay"]]),
+        "effort": round(sum(r["effort"] or 0 for r in rows), 1),
         "progress": round(
-            sum((r.progress or 0) * (r.days or 1) for r in planned) / weight, 4),
-        "first_day": _iso(min(starts)) if starts else None,
-        "last_day": _iso(max(ends)) if ends else None,
+            sum((r["progress"] or 0) * (r["days"] or 1) for r in planned) / weight, 4),
+        "first_day": min(starts) if starts else None,
+        "last_day": max(ends) if ends else None,
     }
 
 

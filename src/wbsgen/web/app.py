@@ -121,9 +121,9 @@ def build_workbook(payload: Dict[str, Any] = Body(...)) -> Response:
     )
 
 
-def _filename(spec: BlankWBS) -> str:
+def _filename(spec: BlankWBS, suffix: str = "") -> str:
     stem = "".join(c for c in spec.title if c not in '\\/:*?"<>|').strip()
-    return quote(f"{stem or 'wbs'}_{spec.start:%Y%m%d}.xlsx")
+    return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.xlsx")
 
 
 # ----------------------------------------------------------------------
@@ -137,6 +137,11 @@ async def import_workbook(
     ``unit`` を渡すと、ファイルに書かれた表示単位より優先する
     (同じ内容を日/週/月で見比べるため)。
     """
+    return build_chart(await _read_upload(file, unit))
+
+
+async def _read_upload(file: UploadFile, unit: Optional[str]):
+    """アップロードされた Excel を読み込む (import / export で共通)。"""
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="ファイルが大きすぎます (上限 8MB)")
@@ -163,7 +168,33 @@ async def import_workbook(
             status_code=422,
             detail="記入された行が見つかりません。項目と日付を入れてから読み込んでください。",
         )
-    return build_chart(imported)
+    return imported
+
+
+@app.post("/api/export")
+async def export_workbook(
+    file: UploadFile = File(...),
+    unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
+) -> Response:
+    """記入済みの Excel を読み込み、ガントチャートを描き込んで返す。
+
+    画面に出しているのと同じバーを、浮動図形として書き込む。
+    """
+    imported = await _read_upload(file, unit)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "wbs.xlsx"
+        workbook.export(imported, path)
+        data = path.read_bytes()
+
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=wbs.xlsx;"
+                f" filename*=UTF-8''{_filename(imported.spec, '_ガント')}",
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -43,7 +43,8 @@ def test_totals(model):
         "rows": 5, "done": 2, "running": 2, "delayed": 0,
         # 進捗は日数で重み付け: (10+15+10*0.6+20*0.35)/70
         "effort": 105.0, "progress": pytest.approx(0.5429, abs=1e-4),
-        "first_day": "2026-04-01", "last_day": "2026-06-19",
+        # 期間の終わりは、終了日が空の行を補った値まで含む (バーと一致させる)
+        "first_day": "2026-04-01", "last_day": "2026-08-17",
     }
 
 

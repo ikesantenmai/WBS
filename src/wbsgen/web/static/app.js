@@ -477,6 +477,7 @@ function setMode(next) {
   document.querySelector('.layout').classList.toggle('chart-mode', chart);
   $('#chart-unit-field').hidden = !chart;
   $('#btn-back').hidden = !chart;
+  $('#btn-export').hidden = !chart;
   $('#btn-build').hidden = chart;
   $('#preview-title').textContent = chart ? 'ガントチャート' : 'プレビュー';
   $('#preview-hint').textContent = chart
@@ -532,6 +533,7 @@ function bind() {
   }
   $('#spec-form').addEventListener('submit', (event) => event.preventDefault());
   $('#btn-build').addEventListener('click', download);
+  $('#btn-export').addEventListener('click', exportChart);
   $('#btn-back').addEventListener('click', () => {
     loadedFile = null;
     setMode('blank');
@@ -548,15 +550,29 @@ function bind() {
   });
 }
 
-async function download() {
-  const button = $('#btn-build');
+/** 空の WBS を書き出す。 */
+function download() {
+  return save($('#btn-build'), '/api/build', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(currentSpec()),
+  });
+}
+
+/** 表示中のガントチャートを図形として描き込んだ Excel を書き出す。 */
+function exportChart() {
+  if (!loadedFile) return Promise.resolve();
+  const body = new FormData();
+  body.append('file', loadedFile);
+  const unit = $('#chart-unit').value;
+  return save($('#btn-export'), `/api/export?unit=${encodeURIComponent(unit)}`,
+              { method: 'POST', body });
+}
+
+async function save(button, path, options) {
   button.disabled = true;
   try {
-    const response = await api('/api/build', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(currentSpec()),
-    });
+    const response = await api(path, options);
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
     const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);

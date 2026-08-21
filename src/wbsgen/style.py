@@ -24,6 +24,16 @@ C_PLAN_FONT = "000080"     # 予定日付文字
 C_HOLIDAY = "FFEFEF"       # 休日列
 C_SATURDAY = "EFF3FF"      # 土曜列
 C_GRID = "BFBFBF"          # チャート罫線
+C_NOWLINE = "E0203C"       # 現在日線
+
+#: 状態表示の書式 (背景色, 文字色, 太字)。添付ファイルから抽出したもの。
+STATUS_STYLES = {
+    "完了": ("C0C0C0", "808080", False),
+    "実行中": ("FFFF99", "FF9900", False),
+    "残り": ("FFCC00", "800000", False),
+    "遅れ": ("FF99CC", "FF0000", True),
+    "あと": ("CCFFFF", "99CCFF", False),
+}
 
 #: 担当者色の既定パレット (未指定の担当者に順番に割り当てる)
 MEMBER_PALETTE = [

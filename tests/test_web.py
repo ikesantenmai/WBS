@@ -193,3 +193,52 @@ def test_import_reports_unreadable_rows(client, make_filled):
     body = _upload(client, path, name="bad.xlsx").json()
     assert len(body["rows"]) == 4
     assert any("6 行目" in w for w in body["warnings"])
+
+
+# ---------------------------------------------------------------- export
+def test_export_returns_a_workbook_with_the_chart(client, filled_book):
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("filled.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml")
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert "xl/drawings/drawing1.xml" in zf.namelist()   # ガントの図形
+    ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
+    assert ws["E5"].value == "要件定義"
+
+
+def test_export_filename_marks_the_chart(client, filled_book):
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("filled.xlsx", handle.read(), "x")})
+    disposition = response.headers["content-disposition"]
+    assert "filename*=UTF-8''" in disposition
+    assert "%E3%82%AC%E3%83%B3%E3%83%88" in disposition      # 「ガント」
+
+
+@pytest.mark.parametrize("unit", ["day", "week", "month"])
+def test_export_follows_the_requested_unit(client, filled_book, unit):
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", params={"unit": unit},
+                               files={"file": ("filled.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
+    assert ws["S4"].number_format == {"day": "d", "week": "m/d", "month": 'm"月"'}[unit]
+
+
+def test_export_rejects_a_broken_file(client):
+    response = client.post("/api/export", files={"file": ("broken.xlsx", b"nope", "x")})
+    assert response.status_code == 422
+
+
+def test_export_rejects_an_empty_workbook(client, tmp_path):
+    from wbsgen.blank import build as build_spec
+    from wbsgen.workbook import write as write_book
+
+    path = tmp_path / "blank.xlsx"
+    write_book(build_spec(dt.date(2026, 4, 1), months=3, rows=10), path)
+    with open(path, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("blank.xlsx", handle.read(), "x")})
+    assert response.status_code == 422
+    assert "記入された行が見つかりません" in response.json()["detail"]

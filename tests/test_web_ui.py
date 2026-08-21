@@ -86,7 +86,10 @@ def page(server):
 
 
 def _reset(page):
-    """既定の指定 (年度・週単位) に戻し、プレビューが描き終わるまで待つ。"""
+    """新規作成の既定 (年度・週単位) に戻し、プレビューが描き終わるまで待つ。"""
+    if page.is_visible("#btn-back"):
+        page.click("#btn-back")
+        page.wait_for_selector("#spec-form:not([hidden])")
     page.select_option("#unit", "week")
     page.check("input[name=mode][value=end]")
     # 指定が通っていればダウンロードできる状態になる
@@ -233,4 +236,27 @@ def test_importing_a_non_excel_file_shows_a_message(page, tmp_path):
     page.set_input_files("#import-file", str(path))
     page.wait_for_selector("#banner:not([hidden])")
     assert "対応していない形式" in page.text_content("#banner")
+    assert page.errors == []
+
+
+def test_exporting_the_chart(page, filled_book, tmp_path):
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_selector("#btn-export:not([hidden])")
+
+    with page.expect_download() as download:
+        page.click("#btn-export")
+    saved = tmp_path / "gantt.xlsx"
+    download.value.save_as(saved)
+
+    import zipfile
+    with zipfile.ZipFile(saved) as zf:
+        assert "xl/drawings/drawing1.xml" in zf.namelist()
+    assert "ガント" in download.value.suggested_filename
+    assert page.errors == []
+
+
+def test_the_export_button_is_hidden_before_importing(page):
+    _reset(page)
+    assert page.is_hidden("#btn-export")
+    assert page.is_visible("#btn-build")
     assert page.errors == []
