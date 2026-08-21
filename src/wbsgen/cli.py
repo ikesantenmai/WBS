@@ -42,6 +42,12 @@ def main(argv=None) -> int:
     check.add_argument("source", help="プロジェクト定義")
     check.set_defaults(func=_cmd_check)
 
+    serve = sub.add_parser("serve", help="Web アプリケーションを起動する")
+    serve.add_argument("--host", default="127.0.0.1", help="待ち受けホスト (既定: 127.0.0.1)")
+    serve.add_argument("--port", type=int, default=8000, help="待ち受けポート (既定: 8000)")
+    serve.add_argument("--reload", action="store_true", help="コード変更時に自動再起動する")
+    serve.set_defaults(func=_cmd_serve)
+
     args = parser.parse_args(argv)
     try:
         return args.func(args)
@@ -82,6 +88,18 @@ def _cmd_init(args) -> int:
     write_template(args.template, output)
     print(f"雛形を書き出しました: {output}")
     print(f"  wbsgen build {output} で Excel を生成できます。")
+    return 0
+
+
+def _cmd_serve(args) -> int:
+    try:
+        from .web import serve
+    except ImportError:
+        print("エラー: Web アプリには追加の依存が必要です。"
+              "\n  pip install 'wbsgen[web]'", file=sys.stderr)
+        return 2
+    print(f"起動しました: http://{args.host}:{args.port}/  (Ctrl+C で終了)")
+    serve(host=args.host, port=args.port, reload=args.reload)
     return 0
 
 

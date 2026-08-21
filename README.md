@@ -8,7 +8,11 @@
 Python で再実装したものです。Excel やマクロを使わずに、CI やスクリプトから
 同じ成果物を作り直せます。
 
+ブラウザで編集する **Web アプリ**と、定義ファイルから一括生成する **CLI** の
+どちらからでも同じ Excel を作れます。
+
 ```
+wbsgen serve                 # ブラウザで編集する (http://127.0.0.1:8000)
 wbsgen init -o wbs.yaml      # 雛形を書き出す
 wbsgen build wbs.yaml        # wbs.xlsx を生成する
 wbsgen check wbs.yaml        # 遅延タスクを一覧する
@@ -58,10 +62,57 @@ wbsgen check wbs.yaml        # 遅延タスクを一覧する
 ## インストール
 
 ```bash
-pip install -e .
+pip install -e .          # CLI のみ (openpyxl と PyYAML だけ)
+pip install -e '.[web]'   # Web アプリも使う (FastAPI / uvicorn を追加)
 ```
 
-Python 3.9 以上。依存は `openpyxl` と `PyYAML` だけです。
+Python 3.9 以上。
+
+---
+
+## Web アプリ
+
+```bash
+wbsgen serve                       # http://127.0.0.1:8000
+wbsgen serve --host 0.0.0.0 --port 8080
+```
+
+画面は左に設定、中央に WBS 一覧、右にガントチャートが並びます。
+
+- **表を編集** — 行をクリックするとダイアログが開き、日付・日数・進捗・担当などを
+  編集できます。ドラッグで行の並べ替え、ボタンでタスク／工程／マイルストーンの追加。
+- **その場で再計算** — 編集するたびにサーバへ送られ、終了日・遅れ・状態・
+  イナズマ線が引き直されます。日程計算もチャートの座標も **CLI と同じエンジン**を
+  通るので、**画面のプレビューと生成される Excel は一致します**。
+- **設定** — 表示単位 (日/週/月)、表示期間、基準日、状態しきい値、稼働曜日、
+  祝日の扱い、担当者と担当色をその場で切り替えられます。
+- **読み込み** — 既存の YAML / JSON / CSV をドロップして続きから編集できます
+  (Excel が書き出した CP932 の CSV も読めます)。
+- **書き出し** — 「Excel を生成」で `.xlsx`、「YAML 保存」で定義ファイル。
+  YAML はそのまま CLI の入力になるので、画面で組んだものを CI に載せられます。
+- **表を畳む** — 一覧を項番・項目・状態だけにして、チャートを広く使えます。
+
+### API
+
+画面を使わずに HTTP から叩くこともできます。
+
+| メソッド | パス | 内容 |
+|---------|------|------|
+| `GET` | `/api/meta` | 選択肢 (表示単位・種別・記号・雛形) |
+| `GET` | `/api/template/{name}` | 雛形をプロジェクト定義として返す |
+| `POST` | `/api/preview` | 日程を解決し、表とチャートの描画モデルを返す |
+| `POST` | `/api/build` | Excel ブックを返す |
+| `POST` | `/api/export/yaml` | 定義を YAML テキストで返す |
+| `POST` | `/api/import` | YAML / JSON / CSV を読み込んで定義に変換する |
+
+リクエストボディは定義ファイルと同じ構造の JSON です。定義に不備があると
+`422` と日本語のメッセージが返ります。
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/build \
+     -H 'Content-Type: application/json' \
+     -d @project.json -o wbs.xlsx
+```
 
 ---
 
@@ -202,6 +253,7 @@ wbsgen build examples/sbi_web_wbs.yaml -o out/sbi.xlsx
 wbsgen init  [-t standard|minimal] [-o wbs.yaml] [-f]
 wbsgen build <定義ファイル> [-o out.xlsx] [--unit day|week|month] [--base-date YYYY-MM-DD]
 wbsgen check <定義ファイル>
+wbsgen serve [--host 127.0.0.1] [--port 8000] [--reload]
 ```
 
 `build` の `--unit` / `--base-date` は定義ファイルの設定を一時的に上書きします。
@@ -213,9 +265,12 @@ wbsgen check <定義ファイル>
 ## 開発
 
 ```bash
-pip install -e . pytest
+pip install -e '.[web]' pytest
 pytest -q
 ```
+
+`tests/test_web_ui.py` は Playwright と Chromium がある環境でだけ実行され、
+無ければ skip します (JavaScript が実際に動くことの確認用)。
 
 ### 構成
 
@@ -227,6 +282,8 @@ src/wbsgen/
   style.py         配色と書式 (元ファイルから抽出)
   loader.py        YAML / JSON / CSV の読み込みと検証
   cli.py           コマンドライン
+  serialize.py     定義の辞書化 / YAML 書き戻し
+  preview.py       ブラウザ描画用のチャートモデル
   templates/       定義ファイルの雛形
   render/
     workbook.py    4 シートの組み立て
@@ -234,4 +291,11 @@ src/wbsgen/
     gantt.py       バー・記号・線の配置計算
     drawing.py     DrawingML の生成
     inject.py      xlsx への図形パート注入
+  web/
+    app.py         FastAPI のエンドポイント
+    static/        画面 (index.html / app.js / style.css)
 ```
+
+Web UI は素の HTML + JavaScript で、ビルド手順も外部 CDN もありません。
+チャートは SVG で描いていますが、座標は `preview.py` がサーバ側で計算した
+ものをそのまま使うため、Excel 出力とずれません。
