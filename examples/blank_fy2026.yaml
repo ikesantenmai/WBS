@@ -1,0 +1,50 @@
+# ======================================================================
+# 中身が空の WBS。指定した期間の日程表と記入用の空行 (blank_rows) だけを持つ。
+#   wbsgen build examples/blank_fy2026.yaml -o out/blank.xlsx
+# 同じものはコマンドからも作れる:
+#   wbsgen blank --start 2026-04-01 --end 2027-03-31 --rows 40 -o out/blank.xlsx
+# ======================================================================
+project:
+  title: 2026年度 スケジュール
+  updated_at: null
+chart:
+  start: '2026-04-01'
+  period_days: 365
+  unit: week
+  base_date: '2026-08-21'
+  man_month_days: 20
+  thresholds:
+    exec_remain_days: 5
+    start_near_days: 10
+  show:
+    results: true
+    progress: false
+    manpower: true
+    status: true
+    start_date: true
+    end_date: true
+    predecessor: true
+    predecessor_line: true
+    now_line: true
+    inazuma_line: true
+    member_color: true
+    comment: true
+calendar:
+  workdays:
+  - mon
+  - tue
+  - wed
+  - thu
+  - fri
+  japanese_holidays: true
+  holidays: []
+  extra_workdays: []
+members:
+- name: 設計
+  color: '#4472C4'
+- name: 製造
+  color: '#4472C4'
+- name: テスト
+  color: '#4472C4'
+tasks: []
+blank_rows: 40

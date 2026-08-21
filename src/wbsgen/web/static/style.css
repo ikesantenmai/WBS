@@ -10,6 +10,7 @@
   --accent-ink: #ffffff;
   --header: #99ccff;
   --band: #ffff99;
+  --month-band: #ff9900;
   --group: #ccffcc;
   --plan-cell: #ffffcc;
   --holiday: #ffefef;
@@ -173,3 +174,32 @@ td.delay { color: var(--danger); font-weight: 700; }
 .chart-wrap { position: relative; }
 .chart-head { position: sticky; top: 0; z-index: 2; }
 svg.gantt { display: block; }
+
+/* ---------------- dialog ---------------- */
+.dialog {
+  width: min(660px, 92vw); padding: 0;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); color: var(--ink);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .22);
+}
+.dialog::backdrop { background: rgba(20, 24, 30, .35); }
+.dialog form { padding: 20px 22px 16px; }
+.dialog h2 { margin: 0 0 12px; font-size: 15px; }
+.dialog-hint { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.form-grid label { display: block; font-size: 12px; color: var(--muted); }
+.form-grid label.wide { grid-column: 1 / -1; }
+.form-grid input, .form-grid select {
+  display: block; width: 100%; margin-top: 3px; padding: 6px 8px;
+  font: inherit; font-size: 13px; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 5px; background: #fff;
+}
+.dialog-actions {
+  display: flex; align-items: center; gap: 8px;
+  margin: 18px 0 0; padding: 0;
+}
+
+/* 空行 (記入用の枠) */
+table.wbs tbody tr.is-blank td { background: #fff; cursor: default; }
+table.wbs tbody tr.is-blank td.plan { background: var(--plan-cell); }
+table.wbs tbody tr.is-blank:hover td { outline: none; }

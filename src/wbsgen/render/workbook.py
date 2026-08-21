@@ -14,7 +14,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .. import style
-from ..model import KIND_SUMMARY, Project, Task
+from ..model import KIND_SUMMARY, UNIT_DAY, Project, Task
 from ..scheduling import group_effort, resolve_project
 from .drawing import Geometry
 from .gantt import GanttBuilder
@@ -27,9 +27,8 @@ SHEET_PROCESS = "標準工程"
 SHEET_CONFIG = "設定"
 
 ROW_TITLE = 1
-ROW_BAND = 3        # 年月の帯
-ROW_HEADER = 4      # 見出し / 日付
-ROW_FIRST_TASK = 5
+ROW_BAND = 3        # 上段: 月 (月表示のときは年)
+ROW_HEADER = 4      # 下段: 週の開始日 (日表示は日、月表示は月) / 表側の見出し
 
 #: 表側の見出し (列文字, 見出し, 幅キー)
 TABLE_HEADERS = [
@@ -64,6 +63,8 @@ class WorkbookRenderer:
         self.wb = Workbook()
         self._row_heights: Dict[int, float] = {}
         self._chart_col_px = style.CHART_COL_WIDTH_PX[chart.unit]
+        # 日単位表示では見出しの下に曜日の行が入る
+        self.first_task_row = ROW_HEADER + (2 if chart.unit == UNIT_DAY else 1)
 
     # ------------------------------------------------------------------
     def save(self, path) -> Path:
@@ -166,37 +167,65 @@ class WorkbookRenderer:
 
     # ------------------------------------------------------------------
     def _timeline_header(self, ws: Worksheet) -> None:
+        """日程表の見出しを 2 段で書く。
+
+        元ファイルと同じく、上段 (月/年) はセルを結合せず、区切りが変わる列に
+        だけ日付を置き、``m"月"`` などの表示形式で見せる。
+        """
         first = style.COL_CHART_FIRST
-        # 上段: 年月の帯
-        for start, span, text in self.timeline.band_labels():
-            if span <= 0:
-                continue
-            left = get_column_letter(first + start)
-            right = get_column_letter(first + start + span - 1)
-            if span > 1:
-                ws.merge_cells(f"{left}{ROW_BAND}:{right}{ROW_BAND}")
-            cell = ws[f"{left}{ROW_BAND}"]
-            cell.value = text
-            cell.fill = style.fill(style.C_TIMELINE)
+        top_format, bottom_format = self.timeline.formats
+
+        # 上段の背景はチャート全幅に敷いてから、区切りの列に値を置く
+        for col in self.timeline.columns:
+            cell = ws.cell(row=ROW_BAND, column=first + col.index)
+            cell.fill = style.fill(style.C_MONTH_BAND)
             cell.font = style.font(bold=True)
+            cell.alignment = style.ALIGN_CENTER
+            cell.number_format = top_format
+            cell.border = style.BORDER_CELL
+
+        for index, _span, day, _text in self.timeline.header_top():
+            ws.cell(row=ROW_BAND, column=first + index, value=day)
+
+        # 下段
+        for index, day, _text in self.timeline.header_bottom():
+            col = self.timeline.columns[index]
+            cell = ws.cell(row=ROW_HEADER, column=first + index, value=day)
+            cell.number_format = bottom_format
+            rest = self.timeline.is_rest_column(col)
+            cell.fill = style.fill(style.C_HOLIDAY if rest else style.C_TIMELINE)
+            cell.font = style.font(9, color="C00000" if rest else "000000")
             cell.alignment = style.ALIGN_CENTER
             cell.border = style.BORDER_CELL
 
-        # 下段: 日付/週/月ラベル
+        # 日単位のときは曜日の行を足す
+        if self.timeline.unit == UNIT_DAY:
+            self._weekday_row(ws, first)
+
+    def _weekday_row(self, ws: Worksheet, first: int) -> None:
+        """日単位表示の曜日行 (見出しの直下)。"""
+        row = ROW_HEADER + 1
+        self._set_row_height(ws, row, style.ROW_HEIGHT_HEADER)
         for col in self.timeline.columns:
-            cell = ws.cell(row=ROW_HEADER, column=first + col.index)
-            cell.value = self.timeline.column_label(col)
-            cell.number_format = style.FMT_TEXT
             rest = self.timeline.is_rest_column(col)
-            cell.fill = style.fill(style.C_HOLIDAY if rest else style.C_TIMELINE)
-            cell.font = style.font(8, color="C00000" if rest else "000000")
+            sat = self.timeline.is_saturday_column(col)
+            cell = ws.cell(row=row, column=first + col.index,
+                           value=self.timeline.weekday_label(col))
+            cell.number_format = style.FMT_TEXT
+            cell.fill = style.fill(
+                style.C_SATURDAY if sat else (style.C_HOLIDAY if rest else style.C_TIMELINE))
+            cell.font = style.font(9, color="C00000" if rest and not sat else (
+                "0070C0" if sat else "000000"))
             cell.alignment = style.ALIGN_CENTER
             cell.border = style.BORDER_CELL
+        for col_index in range(2, first):
+            target = ws.cell(row=row, column=col_index)
+            target.fill = style.fill(style.C_HEADER)
+            target.border = style.BORDER_CELL
 
     # ------------------------------------------------------------------
     def _task_rows(self, ws: Worksheet) -> None:
-        show = self.project.chart.show
-        row = ROW_FIRST_TASK
+        row = self.first_task_row
         prev_group = None
         prev_subgroup = None
 
@@ -214,8 +243,36 @@ class WorkbookRenderer:
         if prev_group is not None:
             self._group_footer(ws, row, prev_group)
             row += 1
-        self._last_row = row - 1
-        self._chart_grid(ws, ROW_FIRST_TASK, self._last_row)
+
+        for _ in range(self.project.blank_rows):
+            self._write_blank(ws, row)
+            row += 1
+
+        self._last_row = max(row - 1, self.first_task_row)
+        self._chart_grid(ws, self.first_task_row, self._last_row)
+
+    def _write_blank(self, ws: Worksheet, row: int) -> None:
+        """記入用の空行。罫線と予定欄の色だけ付けておく。"""
+        self._set_row_height(ws, row, style.ROW_HEIGHT_TASK)
+        plan_columns = (style.COL_START, style.COL_DAYS, style.COL_END)
+        for letter, _ in TABLE_HEADERS:
+            cell = ws[f"{letter}{row}"]
+            cell.fill = style.fill(
+                style.C_PLAN_CELL if letter in plan_columns else style.C_WHITE)
+            cell.border = style.BORDER_CELL
+            cell.font = style.font()
+            cell.alignment = style.ALIGN_CENTER
+        ws[f"{style.COL_NAME}{row}"].alignment = style.ALIGN_NAME
+        for letter in plan_columns:
+            ws[f"{letter}{row}"].font = style.font(color=style.C_PLAN_FONT)
+        ws[f"{style.COL_START}{row}"].number_format = style.FMT_DATE
+        ws[f"{style.COL_END}{row}"].number_format = style.FMT_DATE
+        ws[f"{style.COL_DAYS}{row}"].number_format = style.FMT_DAYS
+        ws[f"{style.COL_ASTART}{row}"].number_format = style.FMT_DATE
+        ws[f"{style.COL_AEND}{row}"].number_format = style.FMT_DATE
+        ws[f"{style.COL_ADAYS}{row}"].number_format = style.FMT_DAYS
+        ws[f"{style.COL_PROGRESS}{row}"].number_format = style.FMT_PERCENT
+        ws[f"{style.COL_EFFORT}{row}"].number_format = style.FMT_EFFORT
 
     def _write_task(self, ws: Worksheet, row: int, task: Task,
                     new_group: bool, new_subgroup: bool) -> None:
@@ -290,7 +347,7 @@ class WorkbookRenderer:
                 cell.border = style.BORDER_CHART
 
     def _freeze(self, ws: Worksheet) -> None:
-        ws.freeze_panes = f"{get_column_letter(style.COL_CHART_FIRST)}{ROW_FIRST_TASK}"
+        ws.freeze_panes = f"{get_column_letter(style.COL_CHART_FIRST)}{self.first_task_row}"
         ws.sheet_view.showGridLines = False
 
     def _set_row_height(self, ws: Worksheet, row: int, height: float) -> None:
@@ -317,7 +374,8 @@ class WorkbookRenderer:
         builder = GanttBuilder(
             self.project, self.timeline, geometry,
             first_chart_col=style.COL_CHART_FIRST - 1,
-            header_row=ROW_HEADER - 1,
+            header_row=self.first_task_row - 2,
+            last_row=self._last_row - 1,
             calendar=self.calendar,
         )
         return builder.build()

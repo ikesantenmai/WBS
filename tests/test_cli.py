@@ -49,9 +49,12 @@ def test_build_overrides_unit_and_base_date(tmp_path):
     assert main(["build", str(source), "-o", str(output),
                  "--unit", "day", "--base-date", "2026-06-01"]) == 0
     ws = openpyxl.load_workbook(output)["スケジュール"]
-    # 日単位では 1 列 = 1 日なので、隣接する 2 列のラベルは連続した日付になる
-    assert ws["S4"].value == "1"
-    assert ws["T4"].value == "2"
+    # 日単位では 1 列 = 1 日。見出しは日付の値 + 曜日の行が付く。
+    assert ws["S4"].value == dt.datetime(2026, 4, 1)
+    assert ws["T4"].value == dt.datetime(2026, 4, 2)
+    assert ws["S4"].number_format == "d"
+    assert ws["S5"].value == "水"        # 2026-04-01 は水曜
+    assert ws.freeze_panes == "S6"       # 曜日行のぶん 1 行下がる
 
 
 def test_check_reports_delays(tmp_path, capsys):
@@ -112,3 +115,28 @@ def test_reference_example_builds_and_matches_the_source_workbook(tmp_path):
 def test_bundled_examples_build(tmp_path, name):
     assert main(["build", str(EXAMPLES / name), "-o", str(tmp_path / "o.xlsx")]) == 0
     assert openpyxl.load_workbook(tmp_path / "o.xlsx").sheetnames[0] == "スケジュール"
+
+
+def test_reference_example_reproduces_the_original_timeline_header(tmp_path):
+    """月と週の見出しが添付ファイルと同じ位置・同じ日付になること。"""
+    output = tmp_path / "sbi.xlsx"
+    assert main(["build", str(EXAMPLES / "sbi_web_wbs.yaml"), "-o", str(output)]) == 0
+    ws = openpyxl.load_workbook(output)["スケジュール"]
+
+    # 上段 (行3) は月。元ファイルは S3/W3/AB3/AF3/AK3 にだけ日付が入っている。
+    assert ws["S3"].number_format == 'm"月"'
+    assert [ws[f"{c}3"].value for c in ("S", "W", "AB", "AF", "AK")] == [
+        dt.datetime(2026, 2, 1), dt.datetime(2026, 3, 1), dt.datetime(2026, 4, 5),
+        dt.datetime(2026, 5, 3), dt.datetime(2026, 6, 7),
+    ]
+    assert [ws[f"{c}3"].value for c in ("T", "U", "V", "X", "AA")] == [None] * 5
+    assert ws["S3"].fill.fgColor.rgb.endswith("FF9900")
+    assert ws["S3"].font.bold is True
+
+    # 下段 (行4) は週の開始日。表示開始日から 7 日刻み。
+    assert ws["S4"].number_format == "m/d"
+    assert [ws[f"{c}4"].value for c in ("S", "T", "U", "V", "W")] == [
+        dt.datetime(2026, 2, 1), dt.datetime(2026, 2, 8), dt.datetime(2026, 2, 15),
+        dt.datetime(2026, 2, 22), dt.datetime(2026, 3, 1),
+    ]
+    assert ws["S4"].fill.fgColor.rgb.endswith("FFFF99")

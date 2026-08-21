@@ -37,6 +37,7 @@ def build_preview(project: Project) -> Dict[str, Any]:
         "base_date": base_date.isoformat(),
         "timeline": _timeline(timeline),
         "rows": rows,
+        "blank_rows": project.blank_rows,
         "links": _links(project, rows),
         "now_x": timeline.position(base_date) if timeline.in_range(base_date, base_date) else None,
         "inazuma": _inazuma(project, timeline, calendar, base_date),
@@ -65,6 +66,7 @@ def _color_for(task, colors: Dict[str, str]) -> str:
 
 
 def _timeline(timeline: Timeline) -> Dict[str, Any]:
+    """見出しは Excel と同じ 2 段構成で返す。"""
     return {
         "unit": timeline.unit,
         "start": timeline.start.isoformat(),
@@ -79,9 +81,10 @@ def _timeline(timeline: Timeline) -> Dict[str, Any]:
             }
             for col in timeline.columns
         ],
+        # 上段 (週表示なら月)。区切りが変わる列にだけ値が入る。
         "bands": [
             {"start": start, "span": span, "label": label}
-            for start, span, label in timeline.band_labels()
+            for start, span, _day, label in timeline.header_top()
         ],
     }
 

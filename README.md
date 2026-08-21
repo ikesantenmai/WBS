@@ -13,6 +13,7 @@ Python で再実装したものです。Excel やマクロを使わずに、CI �
 
 ```
 wbsgen serve                 # ブラウザで編集する (http://127.0.0.1:8000)
+wbsgen blank --start 2026-04-01 --end 2027-03-31   # 中身が空の WBS を作る
 wbsgen init -o wbs.yaml      # 雛形を書き出す
 wbsgen build wbs.yaml        # wbs.xlsx を生成する
 wbsgen check wbs.yaml        # 遅延タスクを一覧する
@@ -42,6 +43,22 @@ wbsgen check wbs.yaml        # 遅延タスクを一覧する
 - **担当者一覧** — 担当者と担当色、個別の休日/出勤設定
 - **標準工程** — テンプレートとして再利用する工程定義
 - **設定** — 表示設定・状態しきい値・稼働日設定・休日一覧の書き出し
+
+### 日程表の見出し
+
+見出しは元ファイルと同じ 2 段構成です。上段はセルを結合せず、
+区切りが変わる列にだけ日付を置き、表示形式で「4月」のように見せます
+(セルの中身は日付なので、書式を変えれば年も出せます)。
+
+| 表示単位 | 上段 (行 3) | 下段 (行 4) |
+|---------|------------|------------|
+| 日 | 月 `m"月"` | 日 `d` ＋ 曜日の行 |
+| 週 | 月 `m"月"` | 週の開始日 `m/d` |
+| 月 | 年 `yyyy"年"` | 月 `m"月"` |
+
+週の列は**チャート表示開始日から 7 日刻み**で並びます (曜日には合わせません)。
+添付ファイルも表示開始日 2026-02-01 が日曜のため 2/1, 2/8, 2/15 … と
+日曜始まりで並んでいます。週の区切りを変えたいときは表示開始日をずらしてください。
 
 ### ガントチャートの描画
 
@@ -100,6 +117,7 @@ wbsgen serve --host 0.0.0.0 --port 8080
 |---------|------|------|
 | `GET` | `/api/meta` | 選択肢 (表示単位・種別・記号・雛形) |
 | `GET` | `/api/template/{name}` | 雛形をプロジェクト定義として返す |
+| `GET` | `/api/blank` | 期間だけを決めた空のプロジェクト定義を返す |
 | `POST` | `/api/preview` | 日程を解決し、表とチャートの描画モデルを返す |
 | `POST` | `/api/build` | Excel ブックを返す |
 | `POST` | `/api/export/yaml` | 定義を YAML テキストで返す |
@@ -112,6 +130,52 @@ wbsgen serve --host 0.0.0.0 --port 8080
 curl -X POST http://127.0.0.1:8000/api/build \
      -H 'Content-Type: application/json' \
      -d @project.json -o wbs.xlsx
+```
+
+---
+
+## 中身が空の WBS を作る
+
+タスクを書かずに、**期間だけを決めた WBS** を作れます。
+日程表と罫線・表示形式を整えた記入用の空行が並ぶので、
+配ってから各自に埋めてもらう使い方に向いています。
+
+```bash
+# 2026 年度 (週表示・記入用の空行 40 行)
+wbsgen blank --start 2026-04-01 --end 2027-03-31 -o 2026年度WBS.xlsx
+
+# 期間は月数でも指定できる。日単位表示、空行 80 行。
+wbsgen blank --start 2026-04-01 --months 6 --unit day --rows 80 -o 上期WBS.xlsx
+
+# 担当者をあらかじめ登録しておく
+wbsgen blank --start 2026-04-01 --member 設計 --member 製造 -o wbs.xlsx
+
+# 出力先が .yaml / .json なら定義ファイルを書き出す (あとから編集して build)
+wbsgen blank --start 2026-04-01 --end 2027-03-31 -o wbs.yaml
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--start` | 開始日 (必須) |
+| `--end` / `--period-days` / `--months` | 期間の指定 (既定は 12 か月) |
+| `--unit` | `day` / `week` / `month` (既定 `week`) |
+| `--rows` | 記入用の空行数 (既定 40) |
+| `--title` | プロジェクト名 |
+| `--member` | 担当者を登録する (複数指定可) |
+
+Web アプリの「新規（空）」ボタンからも同じものを作れます。
+
+定義ファイルでは `tasks` を空にして `blank_rows` を指定します
+(`examples/blank_fy2026.yaml` 参照)。既存の WBS の末尾に記入枠を足したいときも
+`blank_rows` が使えます。
+
+```yaml
+chart:
+  start: 2026-04-01
+  period_days: 365
+  unit: week
+tasks: []
+blank_rows: 40
 ```
 
 ---
@@ -183,6 +247,8 @@ tasks:
 | `shape` | マイルストーンの記号: `diamond` `triangle` `circle` `star` `arrow` `chevron` |
 | `comment` | 項目セルに付くコメント |
 
+トップレベルの `blank_rows` で、タスクの後ろに記入用の空行を足せます。
+
 > **注意**: YAML 1.1 では素の `no:` は真偽値として解釈されます。
 > `"no": "11"` と引用するか、別名の `id:` を使ってください
 > (引用しない `no:` も項番として受け付けます)。
@@ -250,6 +316,8 @@ wbsgen build examples/sbi_web_wbs.yaml -o out/sbi.xlsx
 ## コマンド
 
 ```
+wbsgen blank --start YYYY-MM-DD [--end YYYY-MM-DD | --period-days N | --months N]
+             [-o out.xlsx] [--unit day|week|month] [--rows N] [--title 名前] [--member 担当]
 wbsgen init  [-t standard|minimal] [-o wbs.yaml] [-f]
 wbsgen build <定義ファイル> [-o out.xlsx] [--unit day|week|month] [--base-date YYYY-MM-DD]
 wbsgen check <定義ファイル>
@@ -282,6 +350,7 @@ src/wbsgen/
   style.py         配色と書式 (元ファイルから抽出)
   loader.py        YAML / JSON / CSV の読み込みと検証
   cli.py           コマンドライン
+  blank.py         期間だけを指定した空 WBS の組み立て
   serialize.py     定義の辞書化 / YAML 書き戻し
   preview.py       ブラウザ描画用のチャートモデル
   templates/       定義ファイルの雛形

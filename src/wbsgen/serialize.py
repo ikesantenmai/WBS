@@ -43,6 +43,7 @@ def to_dict(project: Project) -> Dict[str, Any]:
         },
         "members": [_member_dict(m) for m in project.members],
         "tasks": [_task_dict(t) for t in project.tasks],
+        "blank_rows": project.blank_rows,
     }
 
 

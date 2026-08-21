@@ -149,6 +149,8 @@ class Project:
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
     members: list = field(default_factory=list)
     tasks: list = field(default_factory=list)
+    #: タスクの後ろに追加する空行の数 (記入用の枠)
+    blank_rows: int = 0
     #: 標準工程シートに出力するテンプレートタスク
     standard_process: list = field(default_factory=list)
 

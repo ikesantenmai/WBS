@@ -11,13 +11,14 @@ import datetime as _dt
 import json
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import Body, FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
+from ..blank import DEFAULT_ROWS, build_blank
 from ..loader import ProjectError, from_csv, from_dict
 from ..model import MILESTONE_SHAPES, VALID_KINDS, VALID_UNITS
 from ..preview import build_preview
@@ -67,6 +68,7 @@ def meta() -> Dict[str, Any]:
         "kinds": list(VALID_KINDS),
         "milestone_shapes": list(MILESTONE_SHAPES),
         "templates": list(TEMPLATE_NAMES),
+        "default_blank_rows": DEFAULT_ROWS,
         "today": _dt.date.today().isoformat(),
     }
 
@@ -80,6 +82,43 @@ def template(name: str) -> Dict[str, Any]:
 
     data = yaml.safe_load(template_path(name).read_text(encoding="utf-8"))
     return to_dict(_project(data))
+
+
+@app.get("/api/blank")
+def blank(
+    start: str = Query(..., description="開始日 (YYYY-MM-DD)"),
+    end: Optional[str] = Query(None, description="終了日 (YYYY-MM-DD)"),
+    months: Optional[int] = Query(None, ge=1, le=120, description="期間 (月数)"),
+    unit: str = Query("week", description="表示単位 (day/week/month)"),
+    rows: int = Query(DEFAULT_ROWS, ge=0, le=2000, description="記入用の空行数"),
+    title: Optional[str] = Query(None, description="プロジェクト名"),
+) -> Dict[str, Any]:
+    """期間だけを決めた、中身が空のプロジェクト定義を返す。"""
+    if unit not in VALID_UNITS:
+        raise HTTPException(status_code=422, detail=f"表示単位が不正です: {unit}")
+    begin = _parse_date(start, "start")
+    try:
+        project = build_blank(
+            start=begin,
+            end=_parse_date(end, "end") if end else None,
+            months=months,
+            unit=unit,
+            rows=rows,
+            title=title or f"{begin.year}年 スケジュール",
+        )
+    except ProjectError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return to_dict(project)
+
+
+def _parse_date(text: str, field: str) -> _dt.date:
+    try:
+        return _dt.datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field} は YYYY-MM-DD 形式で指定してください: {text!r}",
+        )
 
 
 @app.post("/api/preview")

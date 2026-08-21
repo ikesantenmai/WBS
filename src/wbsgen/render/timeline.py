@@ -2,6 +2,21 @@
 
 表示単位 (日/週/月) に応じて列を割り当て、任意の日付を
 「列インデックス + 列内比率」に写像する。
+
+見出しは元ファイルと同じ 2 段構成にする。
+
+===== ====================== ==========================
+単位   上段 (行 3)             下段 (行 4)
+===== ====================== ==========================
+日     月 (``m"月"``)          日 (``d``) ＋ 曜日
+週     月 (``m"月"``)          週の開始日 (``m/d``)
+月     年 (``yyyy"年"``)       月 (``m"月"``)
+===== ====================== ==========================
+
+上段は区切りが変わる列にだけ値を置く (元ファイルはセルを結合していない)。
+
+週の列は**チャート表示開始日から 7 日刻み**で並ぶ。曜日には合わせない
+(元ファイルは 2026-02-01 の日曜始まりで 2/1, 2/8, 2/15 … と並んでいる)。
 """
 
 from __future__ import annotations
@@ -14,6 +29,13 @@ from ..model import UNIT_DAY, UNIT_MONTH, UNIT_WEEK
 from ..workcal import WorkCalendar
 
 WEEKDAY_JP = ("月", "火", "水", "木", "金", "土", "日")
+
+#: 単位ごとの (上段の数値書式, 下段の数値書式)
+HEADER_FORMATS = {
+    UNIT_DAY: ('m"月"', "d"),
+    UNIT_WEEK: ('m"月"', "m/d"),
+    UNIT_MONTH: ('yyyy"年"', 'm"月"'),
+}
 
 
 @dataclass
@@ -50,9 +72,7 @@ class Timeline:
                 day += _dt.timedelta(days=1)
                 i += 1
         elif self.unit == UNIT_WEEK:
-            # 週の開始は月曜に揃える
-            day -= _dt.timedelta(days=day.weekday())
-            self.start = day
+            # 表示開始日を起点に 7 日刻み (曜日には合わせない)
             while day <= self.end:
                 cols.append(Column(i, day, day + _dt.timedelta(days=6)))
                 day += _dt.timedelta(days=7)
@@ -98,31 +118,53 @@ class Timeline:
         return not (end < self.start or start > self.end)
 
     # ------------------------------------------------------------------
-    def band_labels(self):
-        """上段ラベル (年月など) を ``(開始列, 列数, 表示文字列)`` で返す。"""
+    # 見出し
+    # ------------------------------------------------------------------
+    @property
+    def formats(self):
+        """(上段の数値書式, 下段の数値書式)。"""
+        return HEADER_FORMATS[self.unit]
+
+    def _group_key(self, col: Column):
+        """上段の区切り。日/週は月ごと、月表示は年ごと。"""
+        if self.unit == UNIT_MONTH:
+            return col.start.year
+        return (col.start.year, col.start.month)
+
+    def header_top(self):
+        """上段の見出し。区切りが変わる列にだけ値を置く。
+
+        ``(列インデックス, 列数, 日付, 表示文字列)`` の列を返す。
+        """
         if not self.columns:
             return []
         out = []
         current = None
         first = 0
         for col in self.columns:
-            key = (col.start.year, col.start.month) if self.unit != UNIT_MONTH else col.start.year
+            key = self._group_key(col)
             if key != current:
                 if current is not None:
-                    out.append((first, col.index - first, self._band_text(current)))
+                    out.append(self._top_entry(first, col.index - first))
                 current = key
                 first = col.index
-        out.append((first, len(self.columns) - first, self._band_text(current)))
+        out.append(self._top_entry(first, len(self.columns) - first))
         return out
 
-    def _band_text(self, key) -> str:
-        if self.unit == UNIT_MONTH:
-            return f"{key}年"
-        year, month = key
-        return f"{year}/{month}"
+    def _top_entry(self, first: int, span: int):
+        day = self.columns[first].start
+        text = f"{day.year}年" if self.unit == UNIT_MONTH else f"{day.month}月"
+        return (first, span, day, text)
+
+    def header_bottom(self):
+        """下段の見出し。全ての列に値を置く。"""
+        return [
+            (col.index, col.start, self.column_label(col))
+            for col in self.columns
+        ]
 
     def column_label(self, col: Column) -> str:
-        """下段ラベル。"""
+        """下段の表示文字列。"""
         if self.unit == UNIT_DAY:
             return str(col.start.day)
         if self.unit == UNIT_WEEK:

@@ -32,12 +32,13 @@ class GanttBuilder:
     """タスク行からガントチャートの図形を作る。"""
 
     def __init__(self, project: Project, timeline: Timeline, geometry: Geometry,
-                 first_chart_col: int, header_row: int, calendar):
+                 first_chart_col: int, header_row: int, last_row: int, calendar):
         self.project = project
         self.timeline = timeline
         self.geo = geometry
         self.first_col = first_chart_col
         self.header_row = header_row      # 0 始まり: 日付ヘッダの行
+        self.last_row = last_row          # 0 始まり: チャート領域の最終行
         self.calendar = calendar
         self.drawing = Drawing()
         self._colors = self._member_colors()
@@ -252,11 +253,8 @@ class GanttBuilder:
         if not self.timeline.in_range(base, base):
             return
         pos = self.timeline.position(base)
-        rows = [t.row for t in self.project.tasks if t.row > 0]
-        if not rows:
-            return
         frm = self.geo.anchor(pos, self.header_row, 0.0, self.first_col)
-        to = self.geo.anchor(pos, max(rows) - 1, 1.0, self.first_col)
+        to = self.geo.anchor(pos, self.last_row, 1.0, self.first_col)
         self.drawing.add(Shape(
             frm=frm, to=to, preset="line", fill=None,
             line_color=style.C_NOWLINE, line_width_px=1.25, dash="dash",

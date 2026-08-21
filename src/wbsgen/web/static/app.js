@@ -26,6 +26,8 @@ const STATUS_COLORS = {
 };
 
 const COLUMN_WIDTH = { day: 22, week: 45, month: 62 };
+const PALETTE = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5',
+                 '#A5A5A5', '#9E480E', '#636363', '#997300', '#264478'];
 const ROW_H = 26;
 const HEAD_H = 26;
 
@@ -150,6 +152,7 @@ function buildSettings() {
   $('#chart-period').value = state.chart.period_days ?? 360;
   $('#chart-unit').value = state.chart.unit || 'week';
   $('#chart-base').value = state.chart.base_date || '';
+  $('#blank-rows').value = state.blank_rows ?? 0;
   $('#th-remain').value = state.chart.thresholds.exec_remain_days;
   $('#th-near').value = state.chart.thresholds.start_near_days;
 
@@ -253,6 +256,16 @@ function renderTable() {
     body.append(tr);
   });
 
+  // 記入用の空行 (Excel にもそのまま出る枠)
+  for (let i = 0; i < (model.blank_rows || 0); i++) {
+    const tr = el('tr', { class: 'is-blank' });
+    for (const column of columns) {
+      const td = el('td', { class: `${column.cls || ''}${optional(column)}` });
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+
   const table = el('table', { class: 'wbs' }, cols, head, body);
   $('#table-wrap').classList.toggle('collapsed', collapsed);
   enableRowDrag(body);
@@ -336,7 +349,7 @@ function renderChart() {
   const timeline = model.timeline;
   const colW = COLUMN_WIDTH[timeline.unit] || 45;
   const width = timeline.columns.length * colW;
-  const height = HEAD_H * 2 + model.rows.length * ROW_H;
+  const height = HEAD_H * 2 + totalRows() * ROW_H;
   const root = svg('svg', {
     class: 'gantt', width, height, viewBox: `0 0 ${width} ${height}`,
     'data-unit': timeline.unit,
@@ -365,6 +378,11 @@ function defs() {
   return node;
 }
 
+/** 表とチャートで共通の行数 (タスク + 記入用の空行)。 */
+function totalRows() {
+  return model.rows.length + (model.blank_rows || 0);
+}
+
 function chartBackground(timeline, colW, width, height) {
   const g = svg('g');
   const top = HEAD_H * 2;
@@ -380,7 +398,7 @@ function chartBackground(timeline, colW, width, height) {
       stroke: 'var(--line-soft)', 'stroke-width': 1,
     }));
   });
-  for (let r = 0; r <= model.rows.length; r++) {
+  for (let r = 0; r <= totalRows(); r++) {
     const y = top + r * ROW_H;
     g.append(svg('line', {
       x1: 0, y1: y, x2: width, y2: y, stroke: 'var(--line-soft)', 'stroke-width': 1,
@@ -391,44 +409,56 @@ function chartBackground(timeline, colW, width, height) {
 
 function chartHeader(timeline, colW) {
   const g = svg('g', { class: 'chart-head' });
-  g.append(svg('rect', {
-    x: 0, y: 0, width: timeline.columns.length * colW, height: HEAD_H * 2,
-    fill: 'var(--band)',
-  }));
+  const width = timeline.columns.length * colW;
+
+  // 上段: 月 (月表示なら年)。Excel と同じく区切りが変わる列にだけ置く。
+  g.append(svg('rect', { x: 0, y: 0, width, height: HEAD_H, fill: 'var(--month-band)' }));
   for (const band of timeline.bands) {
     const x = band.start * colW;
-    const w = band.span * colW;
     g.append(svg('line', {
-      x1: x, y1: 0, x2: x, y2: HEAD_H * 2, stroke: '#c9ce9a', 'stroke-width': 1,
+      x1: x, y1: 0, x2: x, y2: HEAD_H * 2, stroke: '#b8791f', 'stroke-width': 1,
     }));
     const label = svg('text', {
-      x: x + w / 2, y: HEAD_H / 2 + 4, 'text-anchor': 'middle',
-      'font-size': 11, 'font-weight': 700, fill: '#3b3b1f',
+      x: x + colW / 2, y: HEAD_H / 2 + 4, 'text-anchor': 'middle',
+      'font-size': 11, 'font-weight': 700, fill: '#fff',
     });
-    label.textContent = w >= 34 ? band.label : '';
+    label.textContent = colW >= 26 ? band.label : '';
     g.append(label);
   }
-  g.append(svg('line', {
-    x1: 0, y1: HEAD_H, x2: timeline.columns.length * colW, y2: HEAD_H,
-    stroke: '#c9ce9a', 'stroke-width': 1,
-  }));
+
+  // 下段: 週の開始日 (日表示なら日、月表示なら月)
+  g.append(svg('rect', { x: 0, y: HEAD_H, width, height: HEAD_H, fill: 'var(--band)' }));
   timeline.columns.forEach((column, i) => {
+    if (column.rest) {
+      g.append(svg('rect', {
+        x: i * colW, y: HEAD_H, width: colW, height: HEAD_H, fill: 'var(--holiday)',
+      }));
+    }
+    const hasWeekday = !!column.weekday;
     const label = svg('text', {
-      x: i * colW + colW / 2, y: HEAD_H + HEAD_H / 2 + 4, 'text-anchor': 'middle',
-      'font-size': 10, fill: column.rest ? '#c0392b' : '#4a4a2c',
+      x: i * colW + colW / 2, y: hasWeekday ? HEAD_H + 12 : HEAD_H + HEAD_H / 2 + 4,
+      'text-anchor': 'middle', 'font-size': 10,
+      fill: column.rest ? '#c0392b' : '#4a4a2c',
     });
     label.textContent = colW >= 18 ? column.label : '';
     g.append(label);
-    if (column.weekday && colW >= 18) {
-      label.setAttribute('y', HEAD_H + 12);
+    if (hasWeekday && colW >= 18) {
       const day = svg('text', {
         x: i * colW + colW / 2, y: HEAD_H + 23, 'text-anchor': 'middle',
-        'font-size': 9, fill: column.rest ? '#c0392b' : '#8a8a70',
+        'font-size': 9,
+        fill: column.rest ? '#c0392b' : (column.saturday ? '#0070c0' : '#8a8a70'),
       });
       day.textContent = column.weekday;
       g.append(day);
     }
   });
+  g.append(svg('line', {
+    x1: 0, y1: HEAD_H, x2: width, y2: HEAD_H, stroke: '#b8791f', 'stroke-width': 1,
+  }));
+  g.append(svg('line', {
+    x1: 0, y1: HEAD_H * 2, x2: width, y2: HEAD_H * 2,
+    stroke: 'var(--line)', 'stroke-width': 1,
+  }));
   return g;
 }
 
@@ -611,6 +641,7 @@ function renderSummary() {
     ['開始', t.first_day ?? '-'],
     ['終了', t.last_day ?? '-'],
   ];
+  if (model.blank_rows) items.push(['空行', `${model.blank_rows} 行`]);
   $('#summary').replaceChildren(...items.flatMap(([term, value, warn]) => [
     el('dt', { text: term }),
     el('dd', { text: value, class: warn ? 'warn' : '' }),
@@ -622,7 +653,9 @@ function render() {
   renderChart();
   renderSummary();
   $('#status-chip').className = 'chip';
-  $('#status-chip').textContent = `${model.rows.length} 行 / ${model.timeline.columns.length} 列`;
+  const blank = model.blank_rows ? ` (+空 ${model.blank_rows})` : '';
+  $('#status-chip').textContent =
+    `${model.rows.length} 行${blank} / ${model.timeline.columns.length} 列`;
 }
 
 // ---------------------------------------------------------------- 行編集
@@ -683,6 +716,7 @@ function bindSettings() {
   wire('#chart-period', (n) => { state.chart.period_days = Number(n.value) || 360; });
   wire('#chart-unit', (n) => { state.chart.unit = n.value; });
   wire('#chart-base', (n) => { state.chart.base_date = n.value || null; });
+  wire('#blank-rows', (n) => { state.blank_rows = Math.max(Number(n.value) || 0, 0); });
   wire('#th-remain', (n) => { state.chart.thresholds.exec_remain_days = Number(n.value) || 0; });
   wire('#th-near', (n) => { state.chart.thresholds.start_near_days = Number(n.value) || 0; });
   wire('#jp-holidays', (n) => { state.calendar.japanese_holidays = n.checked; });
@@ -724,7 +758,7 @@ function bindActions() {
   $('#task-delete').addEventListener('click', () => {
     state.tasks.splice(editingRow, 1);
     $('#task-dialog').close();
-    if (!state.tasks.length) state.tasks.push({ name: '新しいタスク', days: 5 });
+    if (!state.tasks.length && !state.blank_rows) state.blank_rows = 1;
     refresh();
   });
 
@@ -771,8 +805,53 @@ function bindActions() {
     event.currentTarget.setAttribute('aria-pressed', String(!hidden));
   });
 
+  $('#btn-blank').addEventListener('click', openBlankDialog);
+  $('#blank-cancel').addEventListener('click', () => $('#blank-dialog').close());
+  $('#blank-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    createBlank();
+  });
+
   $('#btn-yaml').addEventListener('click', () => download('/api/export/yaml', 'wbs.yaml'));
   $('#btn-build').addEventListener('click', () => download('/api/build', 'wbs.xlsx'));
+}
+
+function openBlankDialog() {
+  const form = $('#blank-form');
+  const today = meta.today;
+  const year = Number(today.slice(0, 4));
+  form.elements.start.value = `${year}-04-01`;
+  form.elements.end.value = `${year + 1}-03-31`;
+  form.elements.rows.value = meta.default_blank_rows;
+  form.elements.title.value = `${year}年度 スケジュール`;
+  $('#blank-dialog').showModal();
+}
+
+async function createBlank() {
+  const form = $('#blank-form');
+  const params = new URLSearchParams({
+    start: form.elements.start.value,
+    end: form.elements.end.value,
+    unit: form.elements.unit.value,
+    rows: form.elements.rows.value || '0',
+  });
+  if (form.elements.title.value.trim()) params.set('title', form.elements.title.value.trim());
+
+  try {
+    const response = await api(`/api/blank?${params}`);
+    state = await response.json();
+    state.members = form.elements.members.value
+      .split(/[,、]/)
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .map((name, i) => ({ name, color: PALETTE[i % PALETTE.length] }));
+    $('#blank-dialog').close();
+    buildSettings();
+    await refresh();
+    banner(`${state.chart.start} からの空の WBS を作りました。`, true);
+  } catch (error) {
+    banner(`作成できません: ${error.message}`);
+  }
 }
 
 async function download(path, fallbackName) {

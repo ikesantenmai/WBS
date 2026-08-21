@@ -208,12 +208,12 @@ def resolve_project(project: Project) -> WorkCalendar:
     autoschedule(project, cal)
 
     dates = anchors()
-    if not dates:
+    if not dates and project.chart.start is None:
         raise ValueError(
-            "日付を持つタスクが 1 件もありません。"
-            "少なくとも 1 件に start を指定するか、先行タスクの起点を作ってください。"
+            "チャートの期間を決められません。"
+            "タスクに start を指定するか、chart.start で表示開始日を指定してください。"
         )
-    span_start = min(dates)
+    span_start = min(dates) if dates else project.chart.start
 
     for task in project.tasks:
         resolve_task(task, member_calendar(project, cal, task.member), base_date,

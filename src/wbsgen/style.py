@@ -14,7 +14,8 @@ FONT_SIZE = 10
 # 配色 (元ファイルから抽出)
 # ----------------------------------------------------------------------
 C_HEADER = "99CCFF"        # 見出し行
-C_TIMELINE = "FFFF99"      # 日付ヘッダ帯
+C_TIMELINE = "FFFF99"      # 日付ヘッダ帯 (下段)
+C_MONTH_BAND = "FF9900"    # 月ヘッダ帯 (上段)
 C_GROUP = "CCFFCC"         # 大項目・中項目行
 C_WHITE = "FFFFFF"
 C_TITLE_FONT = "003300"    # タイトル文字

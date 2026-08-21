@@ -57,13 +57,33 @@ def from_dict(data: Dict[str, Any]) -> Project:
         calendar=_calendar(data.get("calendar") or {}),
         members=[_member(m) for m in (data.get("members") or [])],
         tasks=[_task(t, i) for i, t in enumerate(data.get("tasks") or [])],
+        blank_rows=_blank_rows(data.get("blank_rows")),
         standard_process=[_task(t, i) for i, t in enumerate(data.get("standard_process") or [])],
     )
-    if not project.tasks:
-        raise ProjectError("tasks が空です。1 件以上のタスクを定義してください。")
+    if not project.tasks and not project.blank_rows and project.chart.start is None:
+        raise ProjectError(
+            "tasks が空です。タスクを定義するか、"
+            "chart.start と blank_rows で空の WBS を指定してください。"
+        )
     _fill_inherited(project.tasks)
     _fill_inherited(project.standard_process)
     return project
+
+
+#: 空行の上限。これ以上は Excel が重くなるだけなので弾く。
+MAX_BLANK_ROWS = 2000
+
+
+def _blank_rows(value) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ProjectError(f"blank_rows は整数である必要があります: {value!r}")
+    if not 0 <= count <= MAX_BLANK_ROWS:
+        raise ProjectError(f"blank_rows は 0〜{MAX_BLANK_ROWS} の範囲で指定してください: {count}")
+    return count
 
 
 def _chart(data: Dict[str, Any]) -> ChartConfig:

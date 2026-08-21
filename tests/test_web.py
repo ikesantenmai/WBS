@@ -194,3 +194,60 @@ def test_import_rejects_broken_yaml(client):
 def test_import_rejects_oversized_upload(client):
     response = _upload(client, "big.yaml", b"x" * (5 * 1024 * 1024))
     assert response.status_code == 413
+
+
+# ---------------------------------------------------------------- 空 WBS
+def test_blank_endpoint_returns_an_empty_project(client):
+    body = client.get("/api/blank", params={
+        "start": "2026-04-01", "end": "2027-03-31", "rows": 45, "title": "年度計画",
+    }).json()
+    assert body["tasks"] == []
+    assert body["blank_rows"] == 45
+    assert body["chart"]["start"] == "2026-04-01"
+    assert body["chart"]["period_days"] == 365
+    assert body["project"]["title"] == "年度計画"
+
+
+def test_blank_endpoint_accepts_months(client):
+    body = client.get("/api/blank", params={"start": "2026-04-01", "months": 6}).json()
+    assert body["chart"]["period_days"] == 183
+
+
+@pytest.mark.parametrize("params,message", [
+    ({"start": "2026/04/01"}, "YYYY-MM-DD"),
+    ({"start": "2026-04-01", "end": "2025-01-01"}, "終了日"),
+    ({"start": "2026-04-01", "unit": "hour"}, "表示単位"),
+])
+def test_blank_endpoint_rejects_bad_input(client, params, message):
+    response = client.get("/api/blank", params=params)
+    assert response.status_code == 422
+    assert message in response.json()["detail"]
+
+
+def test_preview_of_an_empty_project(client):
+    project = client.get("/api/blank",
+                         params={"start": "2026-04-01", "months": 3, "rows": 20}).json()
+    body = client.post("/api/preview", json=project).json()
+    assert body["rows"] == []
+    assert body["blank_rows"] == 20
+    assert len(body["timeline"]["columns"]) > 10
+    assert body["totals"]["tasks"] == 0
+
+
+def test_build_an_empty_workbook(client):
+    project = client.get("/api/blank",
+                         params={"start": "2026-04-01", "months": 12, "rows": 30}).json()
+    response = client.post("/api/build", json=project)
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert "xl/worksheets/sheet1.xml" in zf.namelist()
+
+
+def test_preview_header_is_two_rows(client):
+    project = client.get("/api/blank",
+                         params={"start": "2026-02-01", "months": 5}).json()
+    timeline = client.post("/api/preview", json=project).json()["timeline"]
+    assert timeline["columns"][0]["label"] == "2/1"
+    assert timeline["columns"][1]["label"] == "2/8"
+    assert [b["label"] for b in timeline["bands"]][:3] == ["2月", "3月", "4月"]
+    assert [b["start"] for b in timeline["bands"]][:3] == [0, 4, 9]

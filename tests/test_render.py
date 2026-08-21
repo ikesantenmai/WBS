@@ -148,24 +148,35 @@ def test_every_shape_has_a_positive_extent(built):
             assert cx > 0 and cy > 0, f"{name} の大きさが 0"
 
 
-def test_bar_left_edge_matches_the_start_date_column(built, project):
-    """予定バーの左端が開始日の列に載っていること。"""
-    with zipfile.ZipFile(built) as zf:
-        root = ET.fromstring(zf.read("xl/drawings/drawing1.xml"))
+def _anchor_of(root, prefix):
     for anchor in root.findall(f"{NS_XDR}twoCellAnchor"):
         name = anchor.find(f"{NS_XDR}sp/{NS_XDR}nvSpPr/{NS_XDR}cNvPr").get("name")
-        if name.startswith("plan-11:画面設計"):
-            col = int(anchor.find(f"{NS_XDR}from/{NS_XDR}col").text)
-            # 2026-04-01 は表示開始週 (S 列 = index 18) に含まれる
-            assert col == 18
-            assert int(anchor.find(f"{NS_XDR}from/{NS_XDR}colOff").text) > 0
-            return
-    pytest.fail("予定バーが見つからない")
+        if name.startswith(prefix):
+            return anchor
+    return None
+
+
+def test_bar_edges_land_on_the_dates(built):
+    """予定バーの左端が開始日の位置に載っていること。"""
+    with zipfile.ZipFile(built) as zf:
+        root = ET.fromstring(zf.read("xl/drawings/drawing1.xml"))
+
+    # 画面設計は 2026-04-01 開始 = 表示開始日そのもの → 先頭列 (S=18) の左端
+    head = _anchor_of(root, "plan-11:画面設計")
+    assert head is not None
+    assert int(head.find(f"{NS_XDR}from/{NS_XDR}col").text) == 18
+    assert int(head.find(f"{NS_XDR}from/{NS_XDR}colOff").text) == 0
+
+    # 実装は先行タスクの翌稼働日 (2026-04-08) 開始 = 2 列目の途中
+    tail = _anchor_of(root, "plan-12:実装")
+    assert tail is not None
+    assert int(tail.find(f"{NS_XDR}from/{NS_XDR}col").text) == 19
+    assert int(tail.find(f"{NS_XDR}from/{NS_XDR}colOff").text) == 0
 
 
 # ----------------------------------------------------------------------
 @pytest.mark.parametrize("unit,expected_first_label", [
-    (UNIT_DAY, "1"), (UNIT_WEEK, "3/30"), (UNIT_MONTH, "4月"),
+    (UNIT_DAY, "1"), (UNIT_WEEK, "4/1"), (UNIT_MONTH, "4月"),
 ])
 def test_timeline_units(unit, expected_first_label):
     cal = WorkCalendar.build()
@@ -173,14 +184,60 @@ def test_timeline_units(unit, expected_first_label):
     assert tl.column_label(tl.columns[0]) == expected_first_label
 
 
+def test_week_columns_step_from_the_chart_start_date():
+    """元ファイルと同じく、週は曜日ではなく表示開始日を起点に 7 日刻みで並ぶ。"""
+    cal = WorkCalendar.build()
+    tl = Timeline(dt.date(2026, 2, 1), 28, UNIT_WEEK, cal)   # 2026-02-01 は日曜
+    assert [c.start for c in tl.columns] == [
+        dt.date(2026, 2, 1), dt.date(2026, 2, 8),
+        dt.date(2026, 2, 15), dt.date(2026, 2, 22),
+    ]
+    assert tl.start == dt.date(2026, 2, 1)
+
+
+def test_header_is_two_rows_of_month_and_week():
+    """上段は月、下段は週の開始日。上段は区切りが変わる列にだけ値が入る。"""
+    cal = WorkCalendar.build()
+    tl = Timeline(dt.date(2026, 2, 1), 150, UNIT_WEEK, cal)
+    assert tl.formats == ('m"月"', "m/d")
+
+    # 添付ファイルの S3 / W3 / AB3 / AF3 と同じ位置・同じ日付
+    top = [(index, day, text) for index, _span, day, text in tl.header_top()]
+    assert top[:4] == [
+        (0, dt.date(2026, 2, 1), "2月"),
+        (4, dt.date(2026, 3, 1), "3月"),
+        (9, dt.date(2026, 4, 5), "4月"),
+        (13, dt.date(2026, 5, 3), "5月"),
+    ]
+    bottom = tl.header_bottom()
+    assert len(bottom) == len(tl)
+    assert bottom[:3] == [
+        (0, dt.date(2026, 2, 1), "2/1"),
+        (1, dt.date(2026, 2, 8), "2/8"),
+        (2, dt.date(2026, 2, 15), "2/15"),
+    ]
+
+
+def test_header_for_day_and_month_units():
+    cal = WorkCalendar.build()
+    day = Timeline(dt.date(2026, 4, 1), 40, UNIT_DAY, cal)
+    assert day.formats == ('m"月"', "d")
+    assert [t for _, _, _, t in day.header_top()] == ["4月", "5月"]
+    assert day.weekday_label(day.columns[0]) == "水"
+
+    month = Timeline(dt.date(2026, 11, 1), 120, UNIT_MONTH, cal)
+    assert month.formats == ('yyyy"年"', 'm"月"')
+    assert [t for _, _, _, t in month.header_top()] == ["2026年", "2027年"]
+
+
 def test_timeline_position_maps_dates_into_columns():
     cal = WorkCalendar.build()
     tl = Timeline(dt.date(2026, 4, 1), 28, UNIT_WEEK, cal)
-    # 週表示: 2026-03-30(月) が 0 列目の先頭
-    assert tl.position(dt.date(2026, 3, 30)) == 0.0
-    assert tl.position(dt.date(2026, 4, 2)) == pytest.approx(3 / 7)
-    assert tl.position(dt.date(2026, 4, 5), end_of_day=True) == pytest.approx(1.0)
-    assert tl.position(dt.date(2026, 4, 6)) == pytest.approx(1.0)
+    # 週表示: 表示開始日 2026-04-01(水) が 0 列目の先頭
+    assert tl.position(dt.date(2026, 4, 1)) == 0.0
+    assert tl.position(dt.date(2026, 4, 4)) == pytest.approx(3 / 7)
+    assert tl.position(dt.date(2026, 4, 7), end_of_day=True) == pytest.approx(1.0)
+    assert tl.position(dt.date(2026, 4, 8)) == pytest.approx(1.0)
 
 
 def test_timeline_clamps_out_of_range_dates():

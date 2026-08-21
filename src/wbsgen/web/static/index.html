@@ -14,6 +14,7 @@
   <input id="title" class="title-input" type="text" aria-label="プロジェクト名" placeholder="プロジェクト名">
   <div class="spacer"></div>
   <div class="actions">
+    <button id="btn-blank" class="btn ghost" type="button">新規（空）</button>
     <label class="btn ghost" for="import-file">読み込み
       <input id="import-file" type="file" accept=".yaml,.yml,.json,.csv,.tsv" hidden>
     </label>
@@ -40,6 +41,7 @@
         </select>
       </label>
       <label>基準日（現在日） <input id="chart-base" type="date"></label>
+      <label>記入用の空行 <input id="blank-rows" type="number" min="0" max="2000" step="1"></label>
     </section>
 
     <section>
@@ -98,6 +100,35 @@
     </div>
   </section>
 </main>
+
+<!-- ============ 空 WBS 作成ダイアログ ============ -->
+<dialog id="blank-dialog" class="dialog">
+  <form method="dialog" id="blank-form">
+    <h2>期間を指定して空の WBS を作る</h2>
+    <p class="dialog-hint">
+      タスクは入れずに、指定した期間の日程表と記入用の空行だけを用意します。
+    </p>
+    <div class="form-grid">
+      <label>プロジェクト名 <input name="title" type="text" placeholder="2026年度 スケジュール"></label>
+      <label>表示単位
+        <select name="unit">
+          <option value="day">日単位</option>
+          <option value="week" selected>週単位</option>
+          <option value="month">月単位</option>
+        </select>
+      </label>
+      <label>開始日 <input name="start" type="date" required></label>
+      <label>終了日 <input name="end" type="date" required></label>
+      <label>記入用の空行 <input name="rows" type="number" min="0" max="2000" value="40"></label>
+      <label>担当者（カンマ区切り） <input name="members" type="text" placeholder="設計, 製造, テスト"></label>
+    </div>
+    <menu class="dialog-actions">
+      <div class="spacer"></div>
+      <button type="button" id="blank-cancel" class="btn ghost">キャンセル</button>
+      <button type="submit" class="btn primary">作成</button>
+    </menu>
+  </form>
+</dialog>
 
 <!-- ============ 行編集ダイアログ ============ -->
 <dialog id="task-dialog" class="dialog">
