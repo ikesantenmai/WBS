@@ -1,8 +1,7 @@
 """ブラウザ経由の疎通確認。
 
 Playwright と Chromium がある環境でだけ動く。無い場合は skip する。
-JavaScript が実際に動いて表とチャートを描けることを確かめるのが目的で、
-細かい見た目は対象にしない。
+JavaScript が実際に動いてプレビューを描き、Excel を落とせることを確かめる。
 """
 
 from __future__ import annotations
@@ -21,10 +20,9 @@ sync_playwright = pytest.importorskip(
     "playwright.sync_api", reason="playwright が必要"
 ).sync_playwright
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
-#: 環境が用意した Chromium (PLAYWRIGHT_BROWSERS_PATH 配下) を優先して探す
 def _chromium_path():
+    """環境が用意した Chromium を探す。"""
     explicit = os.environ.get("WBSGEN_CHROMIUM")
     if explicit and Path(explicit).exists():
         return explicit
@@ -37,7 +35,6 @@ def _chromium_path():
 
 @pytest.fixture(scope="module")
 def server():
-    """テスト用に uvicorn をバックグラウンド起動する。"""
     import uvicorn
 
     from wbsgen.web.app import app
@@ -46,8 +43,8 @@ def server():
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-    instance = uvicorn.Server(config)
+    instance = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=instance.run, daemon=True)
     thread.start()
     for _ in range(100):
@@ -80,8 +77,6 @@ def page(server):
         view = context.new_page()
         errors = []
         view.on("pageerror", lambda e: errors.append(str(e)))
-        view.on("console",
-                lambda m: errors.append(m.text) if m.type == "console" else None)
         view.errors = errors
         view.goto(server, wait_until="networkidle")
         view.wait_for_selector("table.wbs tbody tr")
@@ -90,65 +85,94 @@ def page(server):
             browser.close()
 
 
+def _reset(page):
+    """既定の指定 (年度・週単位) に戻し、プレビューが描き終わるまで待つ。"""
+    page.select_option("#unit", "week")
+    page.check("input[name=mode][value=end]")
+    # 指定が通っていればダウンロードできる状態になる
+    page.wait_for_function("() => !document.querySelector('#btn-build').disabled")
+    page.wait_for_selector("table.wbs tbody tr")
+
+
 # ----------------------------------------------------------------------
-def test_page_renders_table_and_chart(page):
+def test_preview_renders_the_sheet(page):
+    _reset(page)
+    months = page.eval_on_selector_all("th.month", "n => n.map(x => x.textContent)")
+    assert [m for m in months if m][:3] == ["4月", "5月", "6月"]
     assert page.eval_on_selector_all("table.wbs tbody tr", "n => n.length") > 10
-    assert page.eval_on_selector_all("svg.gantt rect", "n => n.length") > 5
-    assert "行" in page.text_content("#status-chip")
+    assert "空行" in page.text_content("#preview-info")
     assert page.errors == []
 
 
-def test_switching_to_day_unit_redraws_the_axis(page):
-    weeks = page.eval_on_selector("svg.gantt", "n => n.viewBox.baseVal.width")
-    page.select_option("#chart-unit", "day")
-    page.wait_for_function(
-        "() => document.querySelector('svg.gantt').dataset.unit === 'day'")
-    labels = page.eval_on_selector_all("svg.gantt text", "n => n.map(x => x.textContent)")
-    assert "月" in labels and "土" in labels          # 曜日の見出しが出る
-    assert any(label.isdigit() for label in labels)   # 日付の見出しが出る
-
-    page.select_option("#chart-unit", "week")
-    page.wait_for_function(
-        "() => document.querySelector('svg.gantt').dataset.unit === 'week'")
-    assert page.eval_on_selector("svg.gantt", "n => n.viewBox.baseVal.width") == weeks
+def test_month_field_is_hidden_until_selected(page):
+    _reset(page)
+    assert page.is_hidden("#field-months")
+    page.check("input[name=mode][value=months]")
+    page.wait_for_selector("#field-months:not([hidden])")
+    assert page.is_hidden("#field-end")
+    page.check("input[name=mode][value=end]")
+    page.wait_for_selector("#field-end:not([hidden])")
     assert page.errors == []
 
 
-def test_editing_a_row_recomputes_the_schedule(page):
-    page.click("table.wbs tbody tr:nth-child(2)")
-    page.wait_for_selector("#task-dialog[open]")
-    page.fill("#task-form input[name=days]", "9")
-    page.click("#task-form button[type=submit]")
+def test_changing_the_unit_redraws_the_axis(page):
+    _reset(page)
+    page.select_option("#unit", "day")
     page.wait_for_function(
-        "() => document.querySelector("
-        "'table.wbs tbody tr:nth-child(2) td:nth-child(6)').textContent.trim() === '9 日'")
+        "() => document.querySelectorAll('table.wbs thead tr').length === 3")
+    weekdays = page.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(3) th", "n => n.map(x => x.textContent)")
+    assert "土" in weekdays and "日" in weekdays
+
+    page.select_option("#unit", "week")
+    page.wait_for_function(
+        "() => document.querySelectorAll('table.wbs thead tr').length === 2")
     assert page.errors == []
 
 
-def test_adding_a_row_grows_the_table(page):
-    before = page.eval_on_selector_all("table.wbs tbody tr", "n => n.length")
-    page.click("#btn-add-task")
-    page.wait_for_selector("#task-dialog[open]")
-    page.fill("#task-form input[name=name]", "ブラウザから追加")
-    page.click("#task-form button[type=submit]")
+def test_changing_the_row_count_changes_the_preview(page):
+    _reset(page)
+    page.fill("#rows", "7")
+    page.dispatch_event("#rows", "change")
     page.wait_for_function(
-        f"() => document.querySelectorAll('table.wbs tbody tr').length === {before + 1}")
+        "() => document.querySelectorAll('table.wbs tbody tr').length === 7")
+    assert "空行 7 行" in page.text_content("#preview-info")
+    page.fill("#rows", "40")
+    page.dispatch_event("#rows", "change")
     assert page.errors == []
 
 
-def test_importing_a_file_replaces_the_project(page):
-    page.set_input_files("#import-file", str(EXAMPLES / "sbi_web_wbs.yaml"))
+def test_extra_holidays_are_counted(page):
+    _reset(page)
+    before = page.text_content("#holiday-note")
+    page.fill("#holidays", "2026-12-30, 2026-12-31")
     page.wait_for_function(
-        "() => document.querySelectorAll('table.wbs tbody tr').length === 128")
-    assert "SBI" in page.input_value("#title")
+        f"() => document.querySelector('#holiday-note').textContent !== {before!r}")
+    assert "祝日・休業日" in page.text_content("#holiday-note")
+    page.fill("#holidays", "")
+    assert page.errors == []
+
+
+def test_invalid_period_shows_a_message_and_blocks_download(page):
+    _reset(page)
+    page.fill("#end", "2020-01-01")
+    page.dispatch_event("#end", "change")
+    page.wait_for_selector("#banner:not([hidden])")
+    assert "終了日" in page.text_content("#banner")
+    assert page.is_disabled("#btn-build")
+
+    page.fill("#end", "2027-03-31")
+    page.dispatch_event("#end", "change")
+    page.wait_for_function("() => !document.querySelector('#btn-build').disabled")
     assert page.errors == []
 
 
 def test_downloading_the_workbook(page, tmp_path):
+    _reset(page)
     with page.expect_download() as download:
         page.click("#btn-build")
     saved = tmp_path / "out.xlsx"
     download.value.save_as(saved)
-    assert saved.stat().st_size > 10000
+    assert saved.stat().st_size > 8000
     assert download.value.suggested_filename.endswith(".xlsx")
     assert page.errors == []

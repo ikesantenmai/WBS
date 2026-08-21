@@ -1,8 +1,7 @@
 """稼働日カレンダー。
 
-WBS の「日数」は暦日ではなく**稼働日**を表す。
-本モジュールは曜日ごとの稼働設定・祝日・個別休日/個別出勤日をまとめて扱い、
-「開始日から N 稼働日目の日付」「期間内の稼働日数」を求める。
+空の WBS では日程の計算はしないが、日単位表示で休日の列を色分けし、
+「設定」シートに休日一覧を載せるために、どの日が休みかは判定する。
 """
 
 from __future__ import annotations
@@ -21,14 +20,14 @@ DEFAULT_WORKDAYS = ("mon", "tue", "wed", "thu", "fri")
 def parse_weekdays(values: Iterable[str]) -> frozenset:
     """``["mon", "tue"]`` / ``["月", "火"]`` を weekday 番号の集合に変換する。"""
     out = set()
-    for v in values:
-        key = str(v).strip().lower()
+    for value in values:
+        key = str(value).strip().lower()
         if key in WEEKDAY_KEYS:
             out.add(WEEKDAY_KEYS.index(key))
-        elif v in WEEKDAY_JP:
-            out.add(WEEKDAY_JP.index(v))
+        elif value in WEEKDAY_JP:
+            out.add(WEEKDAY_JP.index(value))
         else:
-            raise ValueError(f"曜日の指定が不正です: {v!r}")
+            raise ValueError(f"曜日の指定が不正です: {value!r}")
     return frozenset(out)
 
 
@@ -59,7 +58,6 @@ class WorkCalendar:
             extra_workdays=frozenset(extra_workdays),
         )
 
-    # ------------------------------------------------------------------
     def is_workday(self, day: _dt.date) -> bool:
         if day in self.extra_workdays:
             return True
@@ -70,58 +68,16 @@ class WorkCalendar:
     def is_holiday(self, day: _dt.date) -> bool:
         return not self.is_workday(day)
 
-    # ------------------------------------------------------------------
-    def workdays_between(self, start: _dt.date, end: _dt.date) -> int:
-        """``start`` から ``end`` までの稼働日数 (両端を含む)。
-
-        ``end < start`` の場合は 0 を返す。
-        """
-        if end < start:
-            return 0
-        count = 0
+    def holidays_between(self, start: _dt.date, end: _dt.date) -> "list[_dt.date]":
+        """期間内の休日 (設定シートに載せる一覧)。"""
+        out = []
         day = start
         step = _dt.timedelta(days=1)
         while day <= end:
-            if self.is_workday(day):
-                count += 1
+            if day in self.holidays:
+                out.append(day)
             day += step
-        return count
-
-    def next_workday(self, day: _dt.date) -> _dt.date:
-        """``day`` 以降 (``day`` を含む) で最初の稼働日。"""
-        step = _dt.timedelta(days=1)
-        guard = 0
-        while not self.is_workday(day):
-            day += step
-            guard += 1
-            if guard > 3660:
-                raise ValueError("稼働日が 10 年以上見つかりません。カレンダー設定を確認してください。")
-        return day
-
-    def end_date(self, start: _dt.date, workdays: int) -> _dt.date:
-        """``start`` を 1 日目として ``workdays`` 稼働日目にあたる日付を返す。
-
-        元の Excel と同じ数え方 (開始日込み) で、``workdays<=0`` のときは
-        開始日そのものを返す。
-        """
-        if workdays <= 1:
-            return self.next_workday(start)
-        day = self.next_workday(start)
-        remaining = workdays - 1
-        step = _dt.timedelta(days=1)
-        while remaining > 0:
-            day += step
-            if self.is_workday(day):
-                remaining -= 1
-        return day
-
-    def iter_workdays(self, start: _dt.date, end: _dt.date):
-        day = start
-        step = _dt.timedelta(days=1)
-        while day <= end:
-            if self.is_workday(day):
-                yield day
-            day += step
+        return out
 
 
 # ----------------------------------------------------------------------

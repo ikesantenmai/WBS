@@ -1,9 +1,12 @@
-"""wbsgen — WBS / ガントチャート Excel 生成アプリケーション。"""
+"""wbsgen — 空の WBS (ガントチャート用紙) を作るツール。
 
-__version__ = "1.0.0"
+期間を指定すると、月と週 (または日 / 月) の日程表と、記入用の空行が並んだ
+Excel を書き出す。中身は入れない。
+"""
 
-from .loader import load  # noqa: E402
-from .model import Project, Task  # noqa: E402
-from .render import WorkbookRenderer  # noqa: E402
+__version__ = "2.0.0"
 
-__all__ = ["load", "Project", "Task", "WorkbookRenderer", "__version__"]
+from .blank import BlankWBS, build  # noqa: E402
+from .workbook import write  # noqa: E402
+
+__all__ = ["BlankWBS", "build", "write", "__version__"]

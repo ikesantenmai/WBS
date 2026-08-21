@@ -24,19 +24,6 @@ C_PLAN_FONT = "000080"     # 予定日付文字
 C_HOLIDAY = "FFEFEF"       # 休日列
 C_SATURDAY = "EFF3FF"      # 土曜列
 C_GRID = "BFBFBF"          # チャート罫線
-C_NOWLINE = "FF0000"       # 現在日線
-C_INAZUMA = "0070C0"       # イナズマ線
-C_LINK = "808080"          # 先行タスク線
-
-#: 状態表示の書式 (背景色, 文字色, 太字)
-STATUS_STYLES = {
-    "完了": ("C0C0C0", "808080", False),
-    "実行中": ("FFFF99", "FF9900", False),
-    "残り": ("FFCC00", "800000", False),
-    "遅れ": ("FF99CC", "FF0000", True),
-    "あと": ("CCFFFF", "99CCFF", False),
-    "-": ("FFFFFF", "C0C0C0", False),
-}
 
 #: 担当者色の既定パレット (未指定の担当者に順番に割り当てる)
 MEMBER_PALETTE = [
@@ -150,14 +137,6 @@ ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 ALIGN_LEFT = Alignment(horizontal="left", vertical="center")
 ALIGN_RIGHT = Alignment(horizontal="right", vertical="center")
 ALIGN_NAME = Alignment(horizontal="left", vertical="center", shrink_to_fit=True)
-
-
-def status_style(status: str):
-    """状態文字列に対応する (背景色, 文字色, 太字) を返す。"""
-    for key, value in STATUS_STYLES.items():
-        if status.startswith(key):
-            return value
-    return STATUS_STYLES["-"]
 
 
 def shade(color: str, factor: float) -> str:

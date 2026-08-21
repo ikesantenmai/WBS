@@ -3,184 +3,78 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wbsgen — WBS / ガントチャート</title>
+<title>空の WBS を作る</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232f5d9e'/%3E%3Crect x='3' y='4' width='8' height='2' rx='1' fill='white'/%3E%3Crect x='5' y='7' width='8' height='2' rx='1' fill='white'/%3E%3Crect x='4' y='10' width='6' height='2' rx='1' fill='white'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
 <header class="topbar">
-  <h1>WBS ジェネレータ</h1>
-  <input id="title" class="title-input" type="text" aria-label="プロジェクト名" placeholder="プロジェクト名">
+  <h1>空の WBS を作る</h1>
+  <span class="tagline">期間を指定すると、日程表と記入用の空行だけの Excel を書き出します。</span>
   <div class="spacer"></div>
-  <div class="actions">
-    <button id="btn-blank" class="btn ghost" type="button">新規（空）</button>
-    <label class="btn ghost" for="import-file">読み込み
-      <input id="import-file" type="file" accept=".yaml,.yml,.json,.csv,.tsv" hidden>
-    </label>
-    <button id="btn-template" class="btn ghost" type="button">雛形</button>
-    <button id="btn-yaml" class="btn ghost" type="button">YAML 保存</button>
-    <button id="btn-build" class="btn primary" type="button">Excel を生成</button>
-  </div>
+  <button id="btn-build" class="btn primary" type="button">Excel をダウンロード</button>
 </header>
 
 <div id="banner" class="banner" role="alert" hidden></div>
 
 <main class="layout">
-  <!-- ============ 設定 ============ -->
-  <aside class="panel settings" aria-label="設定">
+  <!-- ============ 指定 ============ -->
+  <form class="panel form" id="spec-form" autocomplete="off">
     <section>
-      <h2>チャート</h2>
-      <label>表示開始日 <input id="chart-start" type="date"></label>
-      <label>表示期間（日） <input id="chart-period" type="number" min="7" max="3650" step="1"></label>
-      <label>表示単位
-        <select id="chart-unit">
-          <option value="day">日単位</option>
-          <option value="week">週単位</option>
-          <option value="month">月単位</option>
-        </select>
+      <h2>期間</h2>
+      <label>プロジェクト名
+        <input id="title" type="text" placeholder="2026年度 スケジュール">
       </label>
-      <label>基準日（現在日） <input id="chart-base" type="date"></label>
-      <label>記入用の空行 <input id="blank-rows" type="number" min="0" max="2000" step="1"></label>
+      <label>開始日 <input id="start" type="date" required></label>
+
+      <div class="period-mode" role="radiogroup" aria-label="期間の指定方法">
+        <label class="radio"><input type="radio" name="mode" value="end" checked> 終了日で指定</label>
+        <label class="radio"><input type="radio" name="mode" value="months"> 月数で指定</label>
+      </div>
+      <label id="field-end">終了日 <input id="end" type="date"></label>
+      <label id="field-months" hidden>月数 <input id="months" type="number" min="1" max="120" value="12"></label>
     </section>
 
     <section>
-      <h2>状態しきい値</h2>
-      <label>「残り n 日」 <input id="th-remain" type="number" min="0" max="99"></label>
-      <label>「あと n 日」 <input id="th-near" type="number" min="0" max="99"></label>
-    </section>
-
-    <section>
-      <h2>表示</h2>
-      <div id="show-flags" class="flags"></div>
+      <h2>用紙</h2>
+      <label>日程表の単位
+        <select id="unit"></select>
+      </label>
+      <label>記入用の空行
+        <input id="rows" type="number" min="0" step="1">
+      </label>
     </section>
 
     <section>
       <h2>稼働日</h2>
       <div id="workdays" class="weekdays"></div>
-      <label class="check"><input id="jp-holidays" type="checkbox"> 日本の祝日を休みにする</label>
-      <label>追加の休業日
-        <input id="extra-holidays" type="text" placeholder="2026-12-30, 2026-12-31">
+      <label class="check"><input id="jp-holidays" type="checkbox" checked> 日本の祝日を休みにする</label>
+      <label>休業日を追加
+        <input id="holidays" type="text" placeholder="2026-12-30, 2026-12-31">
       </label>
-      <label>休日だが稼働する日
-        <input id="extra-workdays" type="text" placeholder="2026-05-02">
-      </label>
+      <p class="note" id="holiday-note"></p>
     </section>
 
     <section>
-      <h2>担当者</h2>
-      <div id="members" class="members"></div>
-      <button id="btn-add-member" class="btn tiny" type="button">＋ 担当者</button>
+      <h2>担当者一覧に載せる名前</h2>
+      <label class="sr-only" for="members">担当者</label>
+      <textarea id="members" rows="4" placeholder="設計&#10;製造&#10;テスト"></textarea>
+      <p class="note">1 行に 1 人。空でもかまいません。</p>
     </section>
+  </form>
 
-    <section id="summary-box">
-      <h2>サマリ</h2>
-      <dl id="summary" class="summary"></dl>
-    </section>
-  </aside>
-
-  <!-- ============ 表 + チャート ============ -->
-  <section class="panel workspace">
+  <!-- ============ プレビュー ============ -->
+  <section class="panel preview">
     <div class="toolbar">
-      <button id="btn-add-task" class="btn tiny" type="button">＋ 行を追加</button>
-      <button id="btn-add-summary" class="btn tiny" type="button">＋ 工程</button>
-      <button id="btn-add-milestone" class="btn tiny" type="button">＋ マイルストーン</button>
-      <span class="hint">行をクリックで編集／ドラッグで並べ替え</span>
+      <strong id="preview-title">プレビュー</strong>
+      <span id="preview-info" class="chip"></span>
       <div class="spacer"></div>
-      <button id="btn-collapse" class="btn tiny" type="button" aria-pressed="false">表を畳む</button>
-      <button id="btn-settings" class="btn tiny" type="button" aria-pressed="true">設定</button>
-      <span id="status-chip" class="chip"></span>
+      <span class="hint">実際の Excel と同じ列・同じ見出しです</span>
     </div>
-
-    <div id="scroller" class="scroller">
-      <div class="grid">
-        <div id="table-wrap" class="table-wrap"></div>
-        <div id="chart-wrap" class="chart-wrap"></div>
-      </div>
-    </div>
+    <div id="sheet" class="sheet" aria-live="polite"></div>
   </section>
 </main>
-
-<!-- ============ 空 WBS 作成ダイアログ ============ -->
-<dialog id="blank-dialog" class="dialog">
-  <form method="dialog" id="blank-form">
-    <h2>期間を指定して空の WBS を作る</h2>
-    <p class="dialog-hint">
-      タスクは入れずに、指定した期間の日程表と記入用の空行だけを用意します。
-    </p>
-    <div class="form-grid">
-      <label>プロジェクト名 <input name="title" type="text" placeholder="2026年度 スケジュール"></label>
-      <label>表示単位
-        <select name="unit">
-          <option value="day">日単位</option>
-          <option value="week" selected>週単位</option>
-          <option value="month">月単位</option>
-        </select>
-      </label>
-      <label>開始日 <input name="start" type="date" required></label>
-      <label>終了日 <input name="end" type="date" required></label>
-      <label>記入用の空行 <input name="rows" type="number" min="0" max="2000" value="40"></label>
-      <label>担当者（カンマ区切り） <input name="members" type="text" placeholder="設計, 製造, テスト"></label>
-    </div>
-    <menu class="dialog-actions">
-      <div class="spacer"></div>
-      <button type="button" id="blank-cancel" class="btn ghost">キャンセル</button>
-      <button type="submit" class="btn primary">作成</button>
-    </menu>
-  </form>
-</dialog>
-
-<!-- ============ 行編集ダイアログ ============ -->
-<dialog id="task-dialog" class="dialog">
-  <form method="dialog" id="task-form">
-    <h2 id="task-dialog-title">タスクの編集</h2>
-    <div class="form-grid">
-      <label>大項目 <input name="group" type="text"></label>
-      <label>中項目 <input name="subgroup" type="text"></label>
-      <label>項番 <input name="no" type="text"></label>
-      <label>種別
-        <select name="kind">
-          <option value="task">タスク</option>
-          <option value="summary">工程（サマリ）</option>
-          <option value="milestone">マイルストーン</option>
-        </select>
-      </label>
-      <label class="wide">項目 <input name="name" type="text" required></label>
-
-      <label>予定開始日 <input name="start" type="date"></label>
-      <label>予定日数（稼働日） <input name="days" type="number" min="0" max="9999"></label>
-      <label>実績開始日 <input name="actual_start" type="date"></label>
-      <label>実績日数 <input name="actual_days" type="number" min="0" max="9999"></label>
-
-      <label>進捗（%） <input name="progress" type="number" min="0" max="100" step="1"></label>
-      <label>工数（人日） <input name="effort" type="number" min="0" step="0.5"></label>
-      <label>先行（項番） <input name="predecessor" type="text" placeholder="11, 12"></label>
-      <label>担当 <input name="member" type="text" list="member-list"></label>
-
-      <label id="shape-field">記号
-        <select name="shape">
-          <option value="diamond">菱形</option>
-          <option value="triangle">三角</option>
-          <option value="circle">丸</option>
-          <option value="star">星</option>
-          <option value="arrow">矢印</option>
-          <option value="chevron">山形</option>
-        </select>
-      </label>
-      <label class="wide">コメント <input name="comment" type="text"></label>
-    </div>
-    <datalist id="member-list"></datalist>
-    <p class="dialog-hint">
-      予定開始日を空にして先行を書くと、先行タスクの翌稼働日から自動配置されます。
-    </p>
-    <menu class="dialog-actions">
-      <button type="button" id="task-delete" class="btn danger">削除</button>
-      <div class="spacer"></div>
-      <button type="button" id="task-cancel" class="btn ghost">キャンセル</button>
-      <button type="submit" class="btn primary">保存</button>
-    </menu>
-  </form>
-</dialog>
 
 <script src="/static/app.js"></script>
 </body>

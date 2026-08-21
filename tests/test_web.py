@@ -1,16 +1,14 @@
+import datetime as dt
 import io
-import json
 import zipfile
-from pathlib import Path
 
+import openpyxl
 import pytest
 
 pytest.importorskip("fastapi", reason="Web アプリの依存 (pip install 'wbsgen[web]')")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from wbsgen.web.app import app  # noqa: E402
-
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 @pytest.fixture
@@ -19,16 +17,14 @@ def client():
         yield c
 
 
-@pytest.fixture
-def project(client):
-    return client.get("/api/template/minimal").json()
+SPEC = {"start": "2026-02-01", "end": "2027-01-31", "unit": "week", "rows": 40}
 
 
 # ---------------------------------------------------------------- 画面
 def test_index_serves_the_app_shell(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert "WBS ジェネレータ" in response.text
+    assert "空の WBS を作る" in response.text
     assert "/static/app.js" in response.text
 
 
@@ -37,217 +33,95 @@ def test_static_assets_are_served(client, path):
     assert client.get(path).status_code == 200
 
 
-# ---------------------------------------------------------------- メタ / 雛形
-def test_meta_lists_choices(client):
+def test_meta_offers_the_choices(client):
     body = client.get("/api/meta").json()
-    assert body["units"] == ["day", "week", "month"]
-    assert "milestone" in body["kinds"]
-    assert "standard" in body["templates"]
-
-
-def test_template_returns_a_project(client):
-    body = client.get("/api/template/standard").json()
-    assert body["project"]["title"]
-    assert len(body["tasks"]) > 10
-    assert body["chart"]["unit"] == "week"
-
-
-def test_unknown_template_is_404(client):
-    assert client.get("/api/template/nope").status_code == 404
+    assert [u["value"] for u in body["units"]] == ["day", "week", "month"]
+    assert [w["label"] for w in body["weekdays"]] == list("月火水木金土日")
+    assert body["default_rows"] == 40
+    # 既定は年度 (4 月始まり)
+    assert body["suggested"]["start"].endswith("-04-01")
+    assert body["suggested"]["end"].endswith("-03-31")
 
 
 # ---------------------------------------------------------------- preview
-def test_preview_resolves_dates_and_chart(client, project):
-    body = client.post("/api/preview", json=project).json()
-    assert body["timeline"]["unit"] == "day"
-    assert body["timeline"]["columns"]
-    assert len(body["rows"]) == len(project["tasks"])
-
-    first = body["rows"][0]
-    assert first["end"] is not None          # 終了日が導出されている
-    assert first["plan"]["x2"] > first["plan"]["x1"]
-    assert body["totals"]["tasks"] == len(project["tasks"])
-
-
-def test_preview_places_bars_where_the_dates_say(client):
-    payload = {
-        "chart": {"start": "2026-04-01", "period_days": 30, "unit": "day",
-                  "base_date": "2026-04-01"},
-        "tasks": [{"name": "A", "start": "2026-04-03", "days": 2}],
-    }
-    row = client.post("/api/preview", json=payload).json()["rows"][0]
-    # 日単位なので 1 列 = 1 日。4/3 は 3 列目 (index 2)、4/6 の終わりで閉じる
-    assert row["end"] == "2026-04-06"        # 4/4,4/5 は土日
-    assert row["plan"]["x1"] == 2.0
-    assert row["plan"]["x2"] == 6.0
+def test_preview_returns_the_timeline(client):
+    body = client.post("/api/preview", json=SPEC).json()
+    assert body["spec"]["period_days"] == 365
+    assert body["spec"]["end"] == "2027-01-31"
+    timeline = body["timeline"]
+    assert len(timeline["columns"]) == 53
+    assert [c["label"] for c in timeline["columns"][:3]] == ["2/1", "2/8", "2/15"]
+    assert [b["label"] for b in timeline["bands"]][:3] == ["2月", "3月", "4月"]
+    assert [b["start"] for b in timeline["bands"]][:3] == [0, 4, 9]
 
 
-def test_preview_returns_links_and_inazuma(client):
-    payload = {
-        "chart": {"start": "2026-04-01", "period_days": 60, "unit": "day",
-                  "base_date": "2026-04-10"},
-        "tasks": [
-            {"no": "1", "name": "A", "start": "2026-04-01", "days": 3, "progress": 1.0,
-             "actual_start": "2026-04-01", "actual_days": 3},
-            {"no": "2", "name": "B", "predecessor": "1", "days": 3},
-        ],
-    }
-    body = client.post("/api/preview", json=payload).json()
-    # A は 4/1〜4/3 (x2=3.0)、B は自動配置で翌稼働日の 4/6 (x1=5.0) から始まる
-    assert body["links"] == [{"from_row": 1, "to_row": 2, "x1": 3.0, "x2": 5.0}]
-    assert [p["row"] for p in body["inazuma"]] == [1, 2]
-    assert body["now_x"] == 9.0
+def test_preview_marks_rest_columns_in_day_view(client):
+    body = client.post("/api/preview",
+                       json={**SPEC, "start": "2026-04-01", "months": 1,
+                             "end": None, "unit": "day"}).json()
+    columns = {c["start"]: c for c in body["timeline"]["columns"]}
+    assert columns["2026-04-04"]["rest"] and columns["2026-04-04"]["saturday"]
+    assert columns["2026-04-29"]["rest"]          # 昭和の日
+    assert not columns["2026-04-30"]["rest"]
+    assert columns["2026-04-01"]["weekday"] == "水"
 
 
-def test_preview_rejects_a_broken_definition(client):
-    response = client.post("/api/preview", json={"tasks": [{"name": "A", "progress": 900}]})
-    assert response.status_code == 422
-    assert "progress" in response.json()["detail"]
+def test_preview_lists_the_holidays(client):
+    body = client.post("/api/preview", json=SPEC).json()
+    assert "2026-02-11" in body["holidays"]
+    assert len(body["holidays"]) == 18
 
 
-def test_preview_reports_circular_predecessors(client):
-    response = client.post("/api/preview", json={"tasks": [
-        {"no": "1", "name": "A", "predecessor": "2", "days": 1},
-        {"no": "2", "name": "B", "predecessor": "1", "days": 1},
-    ]})
-    assert response.status_code == 422
-    assert "循環" in response.json()["detail"]
-
-
-# ---------------------------------------------------------------- build
-def test_build_returns_a_real_workbook(client, project):
-    response = client.post("/api/build", json=project)
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith(
-        "application/vnd.openxmlformats-officedocument.spreadsheetml")
-    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-        names = zf.namelist()
-    assert "xl/worksheets/sheet1.xml" in names
-    assert "xl/drawings/drawing1.xml" in names   # ガントの図形
-
-
-def test_build_filename_carries_the_project_title(client, project):
-    project["project"]["title"] = "テスト計画/2026"
-    disposition = client.post("/api/build", json=project).headers["content-disposition"]
-    assert "filename*=UTF-8''" in disposition
-    assert "%2F" not in disposition             # 使えない文字は落としてある
-
-
-def test_build_rejects_a_broken_definition(client):
-    assert client.post("/api/build", json={"tasks": []}).status_code == 422
-
-
-# ---------------------------------------------------------------- yaml
-def test_export_yaml_round_trips(client, project):
-    response = client.post("/api/export/yaml", json=project)
-    assert response.status_code == 200
-    text = response.content.decode("utf-8")
-    assert "tasks:" in text
-
-    import yaml
-
-    again = client.post("/api/preview", json=yaml.safe_load(text))
-    assert again.status_code == 200
-
-
-# ---------------------------------------------------------------- import
-def _upload(client, name, body, content_type="application/octet-stream"):
-    return client.post("/api/import", files={"file": (name, body, content_type)})
-
-
-def test_import_yaml(client):
-    raw = (EXAMPLES / "sbi_web_wbs.yaml").read_bytes()
-    body = _upload(client, "sbi.yaml", raw).json()
-    assert len(body["tasks"]) == 128
-    assert body["chart"]["base_date"] == "2026-08-07"
-
-
-def test_import_csv(client):
-    raw = (EXAMPLES / "tasks.csv").read_bytes()
-    body = _upload(client, "tasks.csv", raw).json()
-    assert body["tasks"][0]["name"] == "開発環境"
-    assert [m["name"] for m in body["members"]]
-
-
-def test_import_json(client, project):
-    body = _upload(client, "p.json", json.dumps(project).encode()).json()
-    assert len(body["tasks"]) == len(project["tasks"])
-
-
-def test_import_accepts_cp932_csv(client):
-    text = "項目,開始日,日数\nシフトJIS,2026-04-01,3\n"
-    body = _upload(client, "sjis.csv", text.encode("cp932")).json()
-    assert body["tasks"][0]["name"] == "シフトJIS"
-
-
-def test_import_rejects_unsupported_extension(client):
-    response = _upload(client, "notes.txt", b"hello")
-    assert response.status_code == 415
-    assert "対応していない形式" in response.json()["detail"]
-
-
-def test_import_rejects_broken_yaml(client):
-    response = _upload(client, "broken.yaml", b"tasks: [ {name: A\n")
-    assert response.status_code == 422
-
-
-def test_import_rejects_oversized_upload(client):
-    response = _upload(client, "big.yaml", b"x" * (5 * 1024 * 1024))
-    assert response.status_code == 413
-
-
-# ---------------------------------------------------------------- 空 WBS
-def test_blank_endpoint_returns_an_empty_project(client):
-    body = client.get("/api/blank", params={
-        "start": "2026-04-01", "end": "2027-03-31", "rows": 45, "title": "年度計画",
+def test_preview_honours_the_calendar_settings(client):
+    body = client.post("/api/preview", json={
+        **SPEC, "japanese_holidays": False, "holidays": ["2026-12-30"],
     }).json()
-    assert body["tasks"] == []
-    assert body["blank_rows"] == 45
-    assert body["chart"]["start"] == "2026-04-01"
-    assert body["chart"]["period_days"] == 365
-    assert body["project"]["title"] == "年度計画"
+    assert body["holidays"] == ["2026-12-30"]
 
 
-def test_blank_endpoint_accepts_months(client):
-    body = client.get("/api/blank", params={"start": "2026-04-01", "months": 6}).json()
-    assert body["chart"]["period_days"] == 183
-
-
-@pytest.mark.parametrize("params,message", [
-    ({"start": "2026/04/01"}, "YYYY-MM-DD"),
-    ({"start": "2026-04-01", "end": "2025-01-01"}, "終了日"),
+@pytest.mark.parametrize("payload,message", [
+    ({"start": "bad"}, "start"),
+    ({"start": "2026-04-01", "end": "2020-01-01"}, "終了日"),
     ({"start": "2026-04-01", "unit": "hour"}, "表示単位"),
+    ({"start": "2026-04-01", "rows": 99999}, "行数"),
+    ({"start": "2026-04-01", "workdays": ["someday"]}, "曜日"),
 ])
-def test_blank_endpoint_rejects_bad_input(client, params, message):
-    response = client.get("/api/blank", params=params)
+def test_preview_rejects_bad_input(client, payload, message):
+    response = client.post("/api/preview", json=payload)
     assert response.status_code == 422
     assert message in response.json()["detail"]
 
 
-def test_preview_of_an_empty_project(client):
-    project = client.get("/api/blank",
-                         params={"start": "2026-04-01", "months": 3, "rows": 20}).json()
-    body = client.post("/api/preview", json=project).json()
-    assert body["rows"] == []
-    assert body["blank_rows"] == 20
-    assert len(body["timeline"]["columns"]) > 10
-    assert body["totals"]["tasks"] == 0
-
-
-def test_build_an_empty_workbook(client):
-    project = client.get("/api/blank",
-                         params={"start": "2026-04-01", "months": 12, "rows": 30}).json()
-    response = client.post("/api/build", json=project)
+# ---------------------------------------------------------------- build
+def test_build_returns_a_real_workbook(client):
+    response = client.post("/api/build", json={**SPEC, "members": ["設計"]})
     assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml")
+
+    book = openpyxl.load_workbook(io.BytesIO(response.content))
+    assert book.sheetnames == ["スケジュール", "担当者一覧", "設定"]
+    ws = book["スケジュール"]
+    assert ws["S3"].value == dt.datetime(2026, 2, 1)
+    assert ws["S4"].value == dt.datetime(2026, 2, 1)
+    assert ws.max_row == 44
+    assert book["担当者一覧"]["B4"].value == "設計"
+
+
+def test_build_has_no_drawings(client):
+    """空の WBS なので図形は入らない。"""
+    response = client.post("/api/build", json=SPEC)
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-        assert "xl/worksheets/sheet1.xml" in zf.namelist()
+        assert not [n for n in zf.namelist() if "drawings" in n]
 
 
-def test_preview_header_is_two_rows(client):
-    project = client.get("/api/blank",
-                         params={"start": "2026-02-01", "months": 5}).json()
-    timeline = client.post("/api/preview", json=project).json()["timeline"]
-    assert timeline["columns"][0]["label"] == "2/1"
-    assert timeline["columns"][1]["label"] == "2/8"
-    assert [b["label"] for b in timeline["bands"]][:3] == ["2月", "3月", "4月"]
-    assert [b["start"] for b in timeline["bands"]][:3] == [0, 4, 9]
+def test_build_filename_carries_the_title(client):
+    response = client.post("/api/build", json={**SPEC, "title": "年度計画/2026"})
+    disposition = response.headers["content-disposition"]
+    assert "filename*=UTF-8''" in disposition
+    assert "%2F" not in disposition             # 使えない文字は落としてある
+    assert "20260201" in disposition
+
+
+def test_build_rejects_bad_input(client):
+    assert client.post("/api/build", json={"start": "bad"}).status_code == 422
