@@ -307,12 +307,15 @@ class _Writer:
             if not (same and previous.subgroup == row.subgroup):
                 ws[f"{style.COL_SUBGROUP}{at}"] = row.subgroup or None
 
+            # 実績の終了日は、書かれていたものだけを残す。日数から補った値を
+            # 書き戻すと、読み直したときに「完了」と誤解されるため。
+            actual_end = None if "actual_end" in row.derived else row.actual_end
             for letter, value in (
                 (style.COL_NO, row.no), (style.COL_NAME, row.name),
                 (style.COL_START, row.start), (style.COL_DAYS, row.days),
-                (style.COL_END, row.end or self._plan_end(row)),
+                (style.COL_END, row.end),
                 (style.COL_ASTART, row.actual_start), (style.COL_ADAYS, row.actual_days),
-                (style.COL_AEND, row.actual_end), (style.COL_DELAY, row.delay),
+                (style.COL_AEND, actual_end), (style.COL_DELAY, row.delay),
                 (style.COL_PROGRESS, row.progress), (style.COL_EFFORT, row.effort),
                 (style.COL_PRED, row.predecessor), (style.COL_MEMBER, row.member),
                 (style.COL_STATUS, row.status),
@@ -349,21 +352,6 @@ class _Writer:
         background, foreground, bold = style.STATUS_STYLES[kind]
         cell.fill = style.fill(background)
         cell.font = style.font(color=foreground, bold=bold)
-
-    def _plan_end(self, row):
-        """終了日が空なら、日数 (稼働日) から補う。"""
-        if row.end:
-            return row.end
-        if row.start and row.days:
-            return self.calendar.end_date(row.start, row.days)
-        return None
-
-    def _actual_end(self, row):
-        if row.actual_end:
-            return row.actual_end
-        if row.actual_start and row.actual_days:
-            return self.calendar.end_date(row.actual_start, row.actual_days)
-        return None
 
     # ==================================================================
     # ガントチャートの図形
@@ -419,8 +407,8 @@ class _Writer:
         for index, row in enumerate(self.rows):
             row0 = self.first_row + index - 1
             color = self._color(row.member)
-            plan = self._span(row.start, self._plan_end(row))
-            actual = self._span(row.actual_start, self._actual_end(row))
+            plan = self._span(row.start, row.end)
+            actual = self._span(row.actual_start, row.actual_end)
 
             if plan:
                 top, bottom = ((PLAN_TOP_WITH_ACTUAL, PLAN_BOTTOM_WITH_ACTUAL) if actual

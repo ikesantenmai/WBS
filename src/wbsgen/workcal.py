@@ -92,6 +92,22 @@ class WorkCalendar:
                 remaining -= 1
         return day
 
+    def workdays_between(self, start: _dt.date, end: _dt.date) -> int:
+        """``start`` から ``end`` までの稼働日数 (両端を含む)。
+
+        ``end_date`` の逆にあたる。``end < start`` のときは 0。
+        """
+        if end < start:
+            return 0
+        count = 0
+        day = start
+        step = _dt.timedelta(days=1)
+        while day <= end:
+            if self.is_workday(day):
+                count += 1
+            day += step
+        return count
+
     def holidays_between(self, start: _dt.date, end: _dt.date) -> "list[_dt.date]":
         """期間内の休日 (設定シートに載せる一覧)。"""
         out = []

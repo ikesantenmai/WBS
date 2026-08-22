@@ -114,6 +114,8 @@ class Row:
     predecessor: str = ""
     member: str = ""
     status: str = ""
+    #: 記入内容から導き出した項目の名前 (画面で薄く見せるため)
+    derived: set = field(default_factory=set)
 
     @property
     def has_plan(self) -> bool:
@@ -122,6 +124,11 @@ class Row:
     @property
     def has_actual(self) -> bool:
         return self.actual_start is not None
+
+    @property
+    def is_finished(self) -> bool:
+        """実績終了日が入っているか (進捗 100% の判定に使う)。"""
+        return self.actual_end is not None
 
 
 @dataclass
@@ -158,9 +165,52 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE) -> Import
     rows, warnings = _read_rows(sheet, first_row, columns, lang)
 
     spec = _build_spec(config, rows, book, filename, lang)
+    resolve(rows, spec.calendar())
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings)
+
+
+def resolve(rows: List[Row], calendar) -> List[Row]:
+    """記入内容から日数・終了日・進捗を導き出す。
+
+    - 予定の日数は、予定の開始日と終了日から数える (稼働日、両端を含む)
+    - 実績の日数は、実績の開始日と終了日から数える
+    - 実績の終了日が**記入されていれば**、進捗は 100% とみなす
+
+    終了日が書かれていない行は、代わりに日数から終了日を求める
+    (バーを描くため)。この場合は「終わった」とはみなさない。
+    """
+    for row in rows:
+        row.derived = set()
+
+        # --- 予定 ---
+        if row.start and row.end:
+            days = calendar.workdays_between(row.start, row.end)
+            if days != row.days:
+                row.derived.add("days")
+            row.days = days
+        elif row.start and row.days:
+            row.end = calendar.end_date(row.start, row.days)
+            row.derived.add("end")
+
+        # --- 実績 ---
+        # 終了日が「書かれている」かどうかで完了を判断するので、先に控える
+        finished = row.is_finished
+        if row.actual_start and row.actual_end:
+            days = calendar.workdays_between(row.actual_start, row.actual_end)
+            if days != row.actual_days:
+                row.derived.add("actual_days")
+            row.actual_days = days
+        elif row.actual_start and row.actual_days:
+            row.actual_end = calendar.end_date(row.actual_start, row.actual_days)
+            row.derived.add("actual_end")
+
+        # --- 進捗 ---
+        if finished and row.progress != 1.0:
+            row.progress = 1.0
+            row.derived.add("progress")
+    return rows
 
 
 def _pick_sheet(book, names):

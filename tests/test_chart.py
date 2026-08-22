@@ -39,13 +39,23 @@ def test_now_line_is_absent_outside_the_period(filled_book):
 
 
 def test_totals(model):
-    assert model["totals"] == {
-        "rows": 5, "done": 2, "running": 2, "delayed": 0,
-        # 進捗は日数で重み付け: (10+15+10*0.6+20*0.35)/70
-        "effort": 105.0, "progress": pytest.approx(0.5429, abs=1e-4),
-        # 期間の終わりは、終了日が空の行を補った値まで含む (バーと一致させる)
-        "first_day": "2026-04-01", "last_day": "2026-08-17",
-    }
+    totals = model["totals"]
+    assert totals["rows"] == 5
+    assert totals["done"] == 2          # 実績終了日が入っている 2 行
+    assert totals["running"] == 2
+    assert totals["delayed"] == 0
+    assert totals["effort"] == 105.0
+    assert totals["first_day"] == "2026-04-01"
+    # 期間の終わりは、終了日が空の行を補った値まで含む (バーと一致させる)
+    assert totals["last_day"] == "2026-08-17"
+
+
+def test_overall_progress_is_weighted_by_the_counted_days(model):
+    """日数は日付から数え直されるので、重みもその値になる。"""
+    rows = model["rows"]
+    weight = sum(r["days"] for r in rows)
+    expected = sum((r["progress"] or 0) * r["days"] for r in rows) / weight
+    assert model["totals"]["progress"] == pytest.approx(expected, abs=1e-4)
 
 
 # ---------------------------------------------------------------- バー
@@ -64,16 +74,32 @@ def test_a_row_without_an_actual_start_has_no_actual_bar(model):
 def test_an_unfinished_actual_bar_uses_the_recorded_days(model):
     """実績終了日が空でも、実績日数からバーの右端を決める。"""
     row = _by_no(model, "201")
-    assert row["actual_end"] is None
+    assert "actual_end" in row["derived"]        # 補った値であることが判る
     assert row["actual"]["x2"] > row["actual"]["x1"]
+    assert row["progress"] == 0.6                # 完了扱いにはしない
 
 
 def test_a_missing_end_date_is_derived_from_the_workdays(model):
     """終了日が書かれていない行は、日数 (稼働日) から補ってバーを描く。"""
     row = _by_no(model, "301")
     assert row["end"] == "2026-08-17"       # 7/27 から 15 稼働日
-    assert row["end_derived"] is True
-    assert _by_no(model, "101")["end_derived"] is False
+    assert "end" in row["derived"]
+    assert _by_no(model, "101")["derived"] == []
+
+
+def test_days_are_counted_from_the_dates(model):
+    """予定・実績の日数は、書かれた値ではなく日付から数える。"""
+    row = _by_no(model, "102")
+    assert (row["start"], row["end"]) == ("2026-04-15", "2026-05-07")
+    assert row["days"] == 13                    # ファイルには 15 と書いてある
+    assert (row["actual_start"], row["actual_end"]) == ("2026-04-15", "2026-05-12")
+    assert row["actual_days"] == 16             # ファイルには 18 と書いてある
+    assert set(row["derived"]) == {"days", "actual_days"}
+
+
+def test_an_actual_end_date_makes_it_complete(model):
+    assert _by_no(model, "101")["progress"] == 1.0
+    assert _by_no(model, "102")["progress"] == 1.0
 
 
 def test_bars_outside_the_period_are_dropped(make_filled):

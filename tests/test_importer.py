@@ -101,8 +101,8 @@ def test_columns_are_found_by_their_labels(make_filled):
 def test_plan_and_actual_are_told_apart(filled_book):
     """「開始」「日数」は予定と実績の両方にあるので、上の帯で見分ける。"""
     row = read(filled_book).rows[1]
-    assert (row.start, row.days) == (dt.date(2026, 4, 15), 15)
-    assert (row.actual_start, row.actual_days) == (dt.date(2026, 4, 15), 18)
+    assert (row.start, row.end) == (dt.date(2026, 4, 15), dt.date(2026, 5, 7))
+    assert (row.actual_start, row.actual_end) == (dt.date(2026, 4, 15), dt.date(2026, 5, 12))
 
 
 # ---------------------------------------------------------------- 値の解釈
@@ -157,3 +157,80 @@ def test_a_non_excel_file_is_rejected(tmp_path):
     path.write_bytes(b"this is not a workbook")
     with pytest.raises(SpecError, match="Excel として読めません"):
         read(path)
+
+
+# ---------------------------------------------------------------- 導出
+def test_planned_days_are_counted_from_the_dates(make_filled):
+    """予定の日数は、書かれた値ではなく開始日と終了日から数える。"""
+    path = make_filled("d.xlsx", rows=[
+        # 4/1〜4/14 は稼働日 10 日だが、わざと 99 と書いておく
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 99, dt.date(2026, 4, 14),
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    row = read(path).rows[0]
+    assert row.days == 10
+    assert "days" in row.derived
+
+
+def test_actual_days_are_counted_from_the_dates(make_filled):
+    path = make_filled("ad.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), 99, dt.date(2026, 4, 10), None, None, "", "設計", ""),
+    ])
+    row = read(path).rows[0]
+    assert row.actual_days == 8          # 4/1〜4/10 の稼働日
+    assert "actual_days" in row.derived
+
+
+def test_an_actual_end_date_means_one_hundred_percent(make_filled):
+    """実績の終了日が入っていれば、書かれた進捗より優先して 100% とする。"""
+    path = make_filled("p.xlsx", rows=[
+        ("開発", "", "1", "済", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), None, dt.date(2026, 4, 10), 0.3, None, "", "設計", ""),
+        ("開発", "", "2", "途中", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), 5, None, 0.3, None, "", "設計", ""),
+    ])
+    done, running = read(path).rows
+    assert done.progress == 1.0
+    assert "progress" in done.derived
+    assert running.progress == 0.3       # 終了日が無ければ触らない
+    assert "progress" not in running.derived
+
+
+def test_a_derived_actual_end_does_not_mean_finished(make_filled):
+    """実績日数から終了日を補った行は、完了とはみなさない。"""
+    path = make_filled("r.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), 5, None, 0.5, None, "", "設計", ""),
+    ])
+    row = read(path).rows[0]
+    assert row.actual_end == dt.date(2026, 4, 7)     # バーを描くために補う
+    assert "actual_end" in row.derived
+    assert row.progress == 0.5                       # 完了扱いにはしない
+
+
+def test_a_missing_end_date_is_derived_from_the_days(make_filled):
+    path = make_filled("e.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, None,
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    row = read(path).rows[0]
+    assert row.end == dt.date(2026, 4, 14)
+    assert "end" in row.derived
+
+
+def test_days_that_already_match_are_not_marked_as_derived(make_filled):
+    path = make_filled("m.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    assert read(path).rows[0].derived == set()
+
+
+def test_the_working_calendar_is_used_for_counting(make_filled):
+    """稼働曜日の設定が数え方に効く (土曜も稼働にすると日数が増える)。"""
+    weekdays = ["mon", "tue", "wed", "thu", "fri", "sat"]
+    rows = [("開発", "", "1", "A", dt.date(2026, 4, 1), None, dt.date(2026, 4, 14),
+             None, None, None, None, None, "", "設計", "")]
+    assert read(make_filled("w1.xlsx", rows=rows)).rows[0].days == 10
+    assert read(make_filled("w2.xlsx", rows=rows, workdays=weekdays)).rows[0].days == 12

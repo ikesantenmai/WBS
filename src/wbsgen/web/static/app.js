@@ -79,7 +79,11 @@ const UI = {
     info_chart: '{start} 〜 {end} / {columns} 列 / {rows} 行',
     info_limited: '（先頭 {n} 行を表示）',
     warning_title: '読み飛ばした行があります',
+    derived_days: '開始日と終了日から数えた稼働日数',
     derived_end: '日数から補った終了日',
+    derived_actual_days: '実績の開始日と終了日から数えた稼働日数',
+    derived_actual_end: '実績日数から補った終了日',
+    derived_progress: '実績の終了日が入っているので 100%',
     imported: '{name} を読み込みました。',
     saved: '{name} を書き出しました。',
     cannot_import: '読み込めません: {reason}',
@@ -144,7 +148,11 @@ const UI = {
     info_chart: '{start} - {end} / {columns} columns / {rows} rows',
     info_limited: ' (showing the first {n})',
     warning_title: 'Some rows were skipped',
+    derived_days: 'Working days counted from the start and end dates',
     derived_end: 'End date derived from the number of days',
+    derived_actual_days: 'Working days counted from the actual start and end dates',
+    derived_actual_end: 'End date derived from the actual number of days',
+    derived_progress: '100% because an actual end date is filled in',
     imported: 'Imported {name}.',
     saved: 'Saved {name}.',
     cannot_import: 'Cannot import: {reason}',
@@ -398,12 +406,15 @@ function tableCell(row, column, previous) {
   else if (['days', 'actual_days', 'delay'].includes(column.key)) {
     value = value == null ? '' : `${value} ${t('unit_days')}`;
   } else if (/start|end$/.test(column.key)) {
-    if (column.key === 'end' && row.end_derived) td.classList.add('derived');
     value = shortDate(value);
   } else if (value == null) value = '';
 
   td.textContent = value;
-  if (column.key === 'end' && row.end_derived) td.title = t('derived_end');
+  // 記入内容から導き出した値は薄く見せ、理由を添える
+  if ((row.derived || []).includes(column.key)) {
+    td.classList.add('derived');
+    td.title = t(`derived_${column.key}`);
+  }
   return td;
 }
 

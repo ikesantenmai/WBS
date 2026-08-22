@@ -33,7 +33,7 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
     today = base_date or _dt.date.today()
     colors = _member_colors(imported)
 
-    rows = [_row(row, timeline, calendar, colors) for row in imported.rows]
+    rows = [_row(row, timeline, colors) for row in imported.rows]
     return {
         "title": imported.title,
         "language": spec.language,
@@ -81,16 +81,8 @@ def _timeline(timeline: Timeline) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-def _row(row: Row, timeline: Timeline, calendar, colors) -> Dict[str, Any]:
-    plan_end = row.end
-    if plan_end is None and row.start and row.days:
-        # 終了日が書かれていなければ、日数 (稼働日) から補ってバーを描く
-        plan_end = calendar.end_date(row.start, row.days)
-
-    actual_end = row.actual_end
-    if actual_end is None and row.actual_start and row.actual_days:
-        actual_end = calendar.end_date(row.actual_start, row.actual_days)
-
+def _row(row: Row, timeline: Timeline, colors) -> Dict[str, Any]:
+    """日数・終了日・進捗は :func:`wbsgen.importer.resolve` が解決済み。"""
     color = colors.get(row.member, "#" + style.MEMBER_PALETTE[0])
     background, foreground = _status_color(row.status)
     return {
@@ -103,11 +95,12 @@ def _row(row: Row, timeline: Timeline, calendar, colors) -> Dict[str, Any]:
         "color": color,
         "start": _iso(row.start),
         "days": row.days,
-        "end": _iso(row.end or plan_end),
-        "end_derived": row.end is None and plan_end is not None,
+        "end": _iso(row.end),
         "actual_start": _iso(row.actual_start),
         "actual_days": row.actual_days,
         "actual_end": _iso(row.actual_end),
+        # 記入内容から導き出した項目 (画面で薄く見せる)
+        "derived": sorted(row.derived),
         "delay": row.delay,
         "progress": row.progress,
         "effort": row.effort,
@@ -115,8 +108,8 @@ def _row(row: Row, timeline: Timeline, calendar, colors) -> Dict[str, Any]:
         "status": row.status,
         "status_bg": background,
         "status_fg": foreground,
-        "plan": _span(timeline, row.start, plan_end),
-        "actual": _span(timeline, row.actual_start, actual_end),
+        "plan": _span(timeline, row.start, row.end),
+        "actual": _span(timeline, row.actual_start, row.actual_end),
     }
 
 

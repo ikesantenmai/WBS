@@ -169,10 +169,26 @@ and the Gantt chart side by side.
 
 Columns are found by their heading text, so files with extra or reordered
 columns still read. The period, working days and holidays come from the
-Settings sheet and the owners from the Members sheet. A row with no end date
-gets one derived from the start date and the number of working days; the
-derived value is shown in a lighter font. Rows that cannot be read are skipped
-and reported on screen.
+Settings sheet and the owners from the Members sheet. Rows that cannot be read
+are skipped and reported on screen.
+
+#### How days and progress are decided
+
+Values are taken from what is filled in, as follows. Derived values are shown
+in a lighter font, with the reason on hover.
+
+| What is filled in | What follows |
+|-------------------|--------------|
+| Planned start and end | **Days are counted from those two** (working days, both ends included); this wins over a written number |
+| Planned start and days only | The end date is derived from the days |
+| Actual start and end | **Actual days are counted from those two** |
+| Actual start and days only | An end date is derived from the actual days (so the bar can be drawn) |
+| An actual end date | **Progress becomes 100%**; this wins over a written value |
+
+Only an actual end date that is *written in* counts as finished. An end date
+**derived** from the actual days does not (otherwise a task in progress would
+silently become complete). For the same reason, a derived actual end date is
+not written back into the cell when exporting.
 
 ### Exporting with the Gantt chart
 
