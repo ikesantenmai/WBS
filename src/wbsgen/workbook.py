@@ -94,7 +94,13 @@ def write(spec: BlankWBS, path) -> Path:
 
 def export(imported, path, base_date=None) -> Path:
     """読み込んだ WBS を、ガントチャートの図形つきで書き出す。"""
-    return _Writer(imported.spec, rows=imported.rows, base_date=base_date).save(path)
+    from .importer import resolve
+
+    spec = imported.spec
+    day = base_date or _dt.date.today()
+    # 状態と遅れは基準日で決まるので、この日付で数え直してから書く
+    resolve(imported.rows, spec.calendar(), day, spec.language)
+    return _Writer(spec, rows=imported.rows, base_date=day).save(path)
 
 
 class _Writer:

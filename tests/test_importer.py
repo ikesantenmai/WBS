@@ -314,7 +314,8 @@ def test_days_that_already_match_are_not_marked_as_derived(make_filled):
         ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
          None, None, None, None, None, "", "設計", ""),
     ])
-    assert read(path).rows[0].derived == set()
+    # 状態は必ず計算するので、日数だけを見る
+    assert "days" not in read(path).rows[0].derived
 
 
 def test_the_working_calendar_is_used_for_counting(make_filled):
@@ -324,3 +325,99 @@ def test_the_working_calendar_is_used_for_counting(make_filled):
              None, None, None, None, None, "", "設計", "")]
     assert read(make_filled("w1.xlsx", rows=rows)).rows[0].days == 10
     assert read(make_filled("w2.xlsx", rows=rows, workdays=weekdays)).rows[0].days == 12
+
+
+# ---------------------------------------------------------------- 状態
+BASE = dt.date(2026, 6, 10)
+
+
+def _one(make_filled, name, **cells):
+    defaults = dict(start=dt.date(2026, 6, 1), days=10, end=dt.date(2026, 6, 12),
+                    actual_start=None, actual_days=None, actual_end=None,
+                    progress=None, status="")
+    defaults.update(cells)
+    path = make_filled(f"s-{name}.xlsx", rows=[(
+        "開発", "", "1", name, defaults["start"], defaults["days"], defaults["end"],
+        defaults["actual_start"], defaults["actual_days"], defaults["actual_end"],
+        defaults["progress"], None, "", "設計", defaults["status"],
+    )])
+    return read(path, base_date=BASE).rows[0]
+
+
+def test_a_finished_row_is_marked_done(make_filled):
+    row = _one(make_filled, "done", actual_start=dt.date(2026, 6, 1),
+               actual_end=dt.date(2026, 6, 8))
+    assert row.status == "完了"
+    assert row.delay is None
+
+
+def test_a_started_row_counts_down_to_the_planned_end(make_filled):
+    row = _one(make_filled, "remaining", actual_start=dt.date(2026, 6, 1))
+    assert row.status == "残り 2 日"      # 6/10 から 6/12 まで
+
+
+def test_an_unstarted_row_counts_down_to_the_planned_start(make_filled):
+    row = _one(make_filled, "upcoming", start=dt.date(2026, 6, 22), days=5,
+               end=dt.date(2026, 6, 26))
+    assert row.status == "あと 8 日"
+
+
+def test_a_row_past_its_planned_end_is_delayed(make_filled):
+    row = _one(make_filled, "end-late", start=dt.date(2026, 5, 1), days=5,
+               end=dt.date(2026, 5, 7), actual_start=dt.date(2026, 5, 1))
+    assert row.delay == 24
+    assert row.status == "遅れ 24 日"
+
+
+def test_a_row_that_should_have_started_is_delayed(make_filled):
+    """予定開始日を過ぎているのに未着手なら「開始遅れ」。"""
+    row = _one(make_filled, "start-late", start=dt.date(2026, 6, 1), days=20,
+               end=dt.date(2026, 6, 26))
+    assert row.delay == 7                 # 6/1 から 6/10 まで
+    assert row.status == "遅れ 7 日"
+
+
+def test_the_countdown_is_zero_on_the_day_itself(make_filled):
+    row = _one(make_filled, "today", actual_start=dt.date(2026, 6, 1),
+               end=BASE, days=8)
+    assert row.status == "残り 0 日"
+
+
+def test_a_row_without_dates_keeps_the_written_status(make_filled):
+    row = _one(make_filled, "kept", start=None, days=None, end=None, status="保留")
+    assert row.status == "保留"
+
+
+def test_the_status_follows_the_base_date(make_filled):
+    """基準日を変えると状態も変わる (何度計算しても壊れない)。"""
+    from wbsgen.importer import resolve
+
+    path = make_filled("moving.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 6, 1), 10, dt.date(2026, 6, 12),
+         dt.date(2026, 6, 1), None, None, None, None, "", "設計", ""),
+    ])
+    imported = read(path, base_date=BASE)
+    calendar = imported.spec.calendar()
+
+    seen = []
+    for day in (dt.date(2026, 6, 1), dt.date(2026, 6, 12), dt.date(2026, 7, 1)):
+        resolve(imported.rows, calendar, day)
+        seen.append(imported.rows[0].status)
+    assert seen == ["残り 9 日", "残り 0 日", "遅れ 13 日"]
+
+    # 同じ基準日で数え直しても結果は変わらない
+    resolve(imported.rows, calendar, BASE)
+    first = imported.rows[0].status
+    resolve(imported.rows, calendar, BASE)
+    assert imported.rows[0].status == first
+
+
+@pytest.mark.parametrize("language,expected", [
+    ("ja", "完了"), ("en", "Done"),
+])
+def test_the_status_is_written_in_the_language(make_filled, language, expected):
+    path = make_filled(f"lang-{language}.xlsx", language=language, rows=[
+        ("開発", "", "1", "A", dt.date(2026, 6, 1), 5, dt.date(2026, 6, 5),
+         dt.date(2026, 6, 1), None, dt.date(2026, 6, 5), None, None, "", "設計", ""),
+    ])
+    assert read(path, language=language, base_date=BASE).rows[0].status == expected

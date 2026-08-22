@@ -43,7 +43,8 @@ def test_totals(model):
     assert totals["rows"] == 5
     assert totals["done"] == 2          # 実績終了日が入っている 2 行
     assert totals["running"] == 2
-    assert totals["delayed"] == 0
+    # 201 は予定終了 5/22 を過ぎて未完了なので、遅れとして数える
+    assert totals["delayed"] == 1
     assert totals["effort"] == 105.0
     assert totals["first_day"] == "2026-04-01"
     # 期間の終わりは、終了日が空の行を補った値まで含む (バーと一致させる)
@@ -131,30 +132,63 @@ def test_a_member_not_on_the_list_still_gets_a_colour(make_filled):
     assert model["rows"][0]["color"].startswith("#")
 
 
-@pytest.mark.parametrize("status,background", [
-    ("完了", "#C0C0C0"),
-    ("実行中", "#FFFF99"),
-    ("遅れ 3 日", "#FF99CC"),
-    ("あと 2 日", "#CCFFFF"),
-    ("残り 1 日", "#FFCC00"),
+#: 状態ごとの配色 (添付ファイルから採ったもの)
+STATUS_COLOURS = {
+    "done": "#C0C0C0", "delayed": "#FF99CC",
+    "remaining": "#FFCC00", "upcoming": "#CCFFFF",
+}
+
+
+def _status_row(make_filled, name, **cells):
+    """1 行だけの WBS を作って、その行の描画モデルを返す。"""
+    defaults = dict(start=dt.date(2026, 6, 1), days=10, end=dt.date(2026, 6, 12),
+                    actual_start=None, actual_days=None, actual_end=None,
+                    progress=None, member="設計")
+    defaults.update(cells)
+    path = make_filled(f"{name}.xlsx", rows=[(
+        "開発", "", "1", name, defaults["start"], defaults["days"], defaults["end"],
+        defaults["actual_start"], defaults["actual_days"], defaults["actual_end"],
+        defaults["progress"], None, "", defaults["member"], "",
+    )])
+    return build_chart(read(path), base_date=BASE)["rows"][0]
+
+
+@pytest.mark.parametrize("name,cells,expected,kind", [
+    # 実績終了日が入っていれば完了
+    ("完了", {"actual_start": dt.date(2026, 6, 1),
+              "actual_end": dt.date(2026, 6, 8)}, "完了", "done"),
+    # 着手済みで、予定終了日まであと何日か
+    ("残り", {"actual_start": dt.date(2026, 6, 1)}, "残り 2 日", "remaining"),
+    # 未着手で、予定開始日まであと何日か
+    ("あと", {"start": dt.date(2026, 6, 22), "days": 5,
+              "end": dt.date(2026, 6, 26)}, "あと 8 日", "upcoming"),
+    # 予定終了日を過ぎて未完了
+    ("遅れ", {"start": dt.date(2026, 5, 1), "days": 5, "end": dt.date(2026, 5, 7),
+              "actual_start": dt.date(2026, 5, 1)}, "遅れ 24 日", "delayed"),
 ])
-def test_status_keeps_the_original_colours(make_filled, status, background):
-    """状態の配色は添付ファイルから採ったものを使う。"""
-    path = make_filled("s.xlsx", rows=[
-        ("開発", "", "1", "A", dt.date(2026, 4, 6), 5, dt.date(2026, 4, 10),
-         None, None, None, None, None, "", "設計", status),
-    ])
-    model = build_chart(read(path), base_date=BASE)
-    assert model["rows"][0]["status_bg"] == background
+def test_status_is_calculated(make_filled, name, cells, expected, kind):
+    """状態は「完了 / 遅れ n 日 / 残り n 日 / あと n 日」を基準日から求める。"""
+    row = _status_row(make_filled, name, **cells)
+    assert row["status"] == expected
+    assert row["status_bg"] == STATUS_COLOURS[kind]
 
 
-def test_an_unknown_status_has_no_colour(make_filled):
-    path = make_filled("u.xlsx", rows=[
-        ("開発", "", "1", "A", dt.date(2026, 4, 6), 5, dt.date(2026, 4, 10),
+def test_a_row_without_dates_keeps_what_was_written(make_filled):
+    """予定の日付が無ければ判断できないので、書かれた状態をそのまま残す。"""
+    path = make_filled("kept.xlsx", rows=[
+        ("開発", "", "1", "保留中", None, None, None,
          None, None, None, None, None, "", "設計", "保留"),
     ])
-    model = build_chart(read(path), base_date=BASE)
-    assert model["rows"][0]["status_bg"] is None
+    row = build_chart(read(path), base_date=BASE)["rows"][0]
+    assert row["status"] == "保留"
+    assert row["status_bg"] is None      # 当てはまる色は無い
+
+
+def test_the_delay_column_matches_the_status(make_filled):
+    row = _status_row(make_filled, "遅れ", start=dt.date(2026, 5, 1), days=5,
+                      end=dt.date(2026, 5, 7), actual_start=dt.date(2026, 5, 1))
+    assert row["delay"] == 24
+    assert row["status"] == "遅れ 24 日"
 
 
 # ---------------------------------------------------------------- 表示単位

@@ -69,6 +69,13 @@ class Labels:
     work_on: str
     work_off: str
 
+    #: 状態の文言 (``{days}`` に日数が入る)
+    status_done: str
+    status_delayed: str
+    status_remaining: str
+    status_upcoming: str
+    status_none: str
+
     #: 既定のプロジェクト名 (``{year}`` に開始年が入る)
     default_title: str
 
@@ -110,6 +117,11 @@ JA = Labels(
     weekday_names=("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"),
     work_on="出",
     work_off="休",
+    status_done="完了",
+    status_delayed="遅れ {days} 日",
+    status_remaining="残り {days} 日",
+    status_upcoming="あと {days} 日",
+    status_none="-",
     default_title="{year}年 スケジュール",
 )
 
@@ -152,6 +164,11 @@ EN = Labels(
                    "Friday", "Saturday", "Sunday"),
     work_on="Work",
     work_off="Off",
+    status_done="Done",
+    status_delayed="Delayed {days} d",
+    status_remaining="Remaining {days} d",
+    status_upcoming="Starts in {days} d",
+    status_none="-",
     default_title="{year} Schedule",
 )
 
@@ -172,7 +189,7 @@ STATUS_KEYWORDS = {
     "running": ("実行中", "In progress", "Running", "Active"),
     "remaining": ("残り", "Remaining", "Left"),
     "delayed": ("遅れ", "Delay", "Delayed", "Late", "Overdue"),
-    "upcoming": ("あと", "Upcoming", "Soon", "Starts in"),
+    "upcoming": ("あと", "Starts in", "Upcoming", "Soon"),
 }
 
 

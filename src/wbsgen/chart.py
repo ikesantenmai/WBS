@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from . import style
 from .i18n import status_kind
-from .importer import ImportedWBS, Row
+from .importer import ImportedWBS, Row, resolve
 from .timeline import Timeline
 
 #: 画面での状態表示の色 (添付ファイルの配色を、画面で読みやすいように調整)
@@ -31,6 +31,8 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
     calendar = spec.calendar()
     timeline = Timeline(spec.start, spec.period_days, spec.unit, calendar, spec.language)
     today = base_date or _dt.date.today()
+    # 状態と遅れは基準日で決まるので、この日付で数え直す
+    resolve(imported.rows, calendar, today, spec.language)
     colors = _member_colors(imported)
 
     rows = [_row(row, timeline, colors) for row in imported.rows]

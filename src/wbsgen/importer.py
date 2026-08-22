@@ -117,6 +117,8 @@ class Row:
     status: str = ""
     #: 記入内容から導き出した項目の名前 (画面で薄く見せるため)
     derived: set = field(default_factory=set)
+    #: セルに書かれていた値。導出をやり直せるように控えておく。
+    written: dict = field(default_factory=dict)
 
     @property
     def has_plan(self) -> bool:
@@ -128,8 +130,11 @@ class Row:
 
     @property
     def is_finished(self) -> bool:
-        """実績終了日が入っているか (進捗 100% の判定に使う)。"""
-        return self.actual_end is not None
+        """実績の終了日が**書かれている**か (完了の判定に使う)。
+
+        実績日数から補った終了日は含めない。
+        """
+        return self.written.get("actual_end") is not None
 
 
 @dataclass
@@ -139,12 +144,13 @@ class ImportedWBS:
     title: str
     spec: BlankWBS
     rows: List[Row] = field(default_factory=list)
-    #: 読めなかった行の説明 (画面に出して知らせる)
+    #: 読めなかったセルの説明 (画面に出して知らせる)
     warnings: List[str] = field(default_factory=list)
 
 
 # ----------------------------------------------------------------------
-def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE) -> ImportedWBS:
+def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
+         base_date: Optional[_dt.date] = None) -> ImportedWBS:
     """``.xlsx`` を読み込む。``source`` はパスかファイルオブジェクト。
 
     日本語版・英語版のどちらのファイルも読める。``language`` は
@@ -166,23 +172,40 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE) -> Import
     rows, warnings = _read_rows(sheet, first_row, columns, lang)
 
     spec = _build_spec(config, rows, book, filename, lang)
-    resolve(rows, spec.calendar())
+    resolve(rows, spec.calendar(), base_date, lang)
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings)
 
 
-def resolve(rows: List[Row], calendar) -> List[Row]:
-    """記入内容から日数・終了日・進捗を導き出す。
+#: 導出のたびに書かれた値へ戻す項目
+WRITTEN_FIELDS = ("start", "end", "days", "actual_start", "actual_end",
+                  "actual_days", "progress", "delay", "status")
+
+
+def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
+            language: str = DEFAULT_LANGUAGE) -> List[Row]:
+    """記入内容から日数・終了日・進捗・状態を導き出す。
 
     - 予定の日数は、予定の開始日と終了日から数える (稼働日、両端を含む)
     - 実績の日数は、実績の開始日と終了日から数える
     - 実績の終了日が**記入されていれば**、進捗は 100% とみなす
+    - 状態は「完了 / 遅れ n 日 / 残り n 日 / あと n 日」を基準日から求める
 
     終了日が書かれていない行は、代わりに日数から終了日を求める
     (バーを描くため)。この場合は「終わった」とはみなさない。
+
+    書かれた値は :attr:`Row.written` に控えてあるので、基準日を変えて
+    何度呼んでも同じ結果になる。
     """
+    base = base_date or _dt.date.today()
+    text = labels(language)
+
     for row in rows:
+        # 前回の導出を巻き戻してから数え直す
+        for key in WRITTEN_FIELDS:
+            if key in row.written:
+                setattr(row, key, row.written[key])
         row.derived = set()
 
         # --- 予定 ---
@@ -196,7 +219,6 @@ def resolve(rows: List[Row], calendar) -> List[Row]:
             row.derived.add("end")
 
         # --- 実績 ---
-        # 終了日が「書かれている」かどうかで完了を判断するので、先に控える
         finished = row.is_finished
         if row.actual_start and row.actual_end:
             days = calendar.workdays_between(row.actual_start, row.actual_end)
@@ -211,7 +233,63 @@ def resolve(rows: List[Row], calendar) -> List[Row]:
         if finished and row.progress != 1.0:
             row.progress = 1.0
             row.derived.add("progress")
+
+        # --- 遅れと状態 ---
+        _resolve_status(row, calendar, base, text, finished)
     return rows
+
+
+def _resolve_status(row: Row, calendar, base: _dt.date, text, finished: bool) -> None:
+    """遅れの日数と状態を求めて書き込む。
+
+    予定の日付が無い行は判断できないので、書かれた状態をそのまま残す。
+    """
+    if row.start is None and row.end is None:
+        return
+
+    if finished:
+        _set(row, "delay", None)
+        _set(row, "status", text.status_done)
+        return
+
+    delay = _delay_days(row, calendar, base)
+    _set(row, "delay", delay)
+    if delay:
+        _set(row, "status", text.status_delayed.format(days=delay))
+    elif row.actual_start and row.end:
+        # 着手済み: 予定の終了日まであと何稼働日か
+        remaining = max(calendar.workdays_between(base, row.end) - 1, 0)
+        _set(row, "status", text.status_remaining.format(days=remaining))
+    elif not row.actual_start and row.start:
+        # 未着手: 予定の開始日まであと何稼働日か
+        upcoming = max(calendar.workdays_between(base, row.start) - 1, 0)
+        _set(row, "status", text.status_upcoming.format(days=upcoming))
+    else:
+        _set(row, "status", text.status_none)
+
+
+def _delay_days(row: Row, calendar, base: _dt.date) -> Optional[int]:
+    """遅れの稼働日数。遅れていなければ ``None``。
+
+    予定開始日を過ぎているのに未着手なら「開始遅れ」、
+    予定終了日を過ぎているのに未完了なら「終了遅れ」を数える。
+    """
+    if row.start and row.start < base and row.actual_start is None:
+        delay = calendar.workdays_between(row.start, base) - 1
+        if delay > 0:
+            return delay
+    if row.end and row.end < base:
+        delay = calendar.workdays_between(row.end, base) - 1
+        if delay > 0:
+            return delay
+    return None
+
+
+def _set(row: Row, key: str, value) -> None:
+    """導出した値を書き込み、書かれた値と違えば印を付ける。"""
+    setattr(row, key, value)
+    if row.written.get(key) != value:
+        row.derived.add(key)
 
 
 def _pick_sheet(book, names):
@@ -346,6 +424,8 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
         row.delay = cell("delay", _int)
         row.progress = cell("progress", _ratio)
         row.effort = cell("effort", _number)
+        # 導出をやり直せるよう、書かれていた値を控える
+        row.written = {key: getattr(row, key) for key in WRITTEN_FIELDS}
 
         if not row.name and not row.has_plan:
             continue

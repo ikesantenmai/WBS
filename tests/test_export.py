@@ -69,11 +69,22 @@ def test_a_missing_end_date_is_filled_in(exported):
     assert ws["H9"].value == dt.datetime(2026, 8, 17)
 
 
-def test_status_keeps_the_original_colours(exported):
+def test_the_status_is_calculated_and_coloured(exported):
+    """状態は基準日から計算して書き込む (配色は添付ファイルと同じ)。"""
     ws = openpyxl.load_workbook(exported)[SHEET_PLAN]
+    # 101/102 は実績終了日が入っているので完了
     assert ws["R5"].value == "完了"
     assert ws["R5"].fill.fgColor.rgb.endswith("C0C0C0")
-    assert ws["R7"].fill.fgColor.rgb.endswith("FFFF99")     # 実行中
+    # 201 は予定終了 5/22 を過ぎて未完了 (基準日 6/10)
+    assert ws["R7"].value == "遅れ 13 日"
+    assert ws["L7"].value == 13                              # 遅れ列も揃える
+    assert ws["R7"].fill.fgColor.rgb.endswith("FF99CC")
+    # 202 は着手済みで予定終了 6/19 まで
+    assert ws["R8"].value == "残り 7 日"
+    assert ws["R8"].fill.fgColor.rgb.endswith("FFCC00")
+    # 301 は未着手
+    assert ws["R9"].value.startswith("あと")
+    assert ws["R9"].fill.fgColor.rgb.endswith("CCFFFF")
 
 
 def test_the_timeline_header_is_kept(exported):

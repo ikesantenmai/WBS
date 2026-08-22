@@ -195,11 +195,32 @@ in a lighter font, with the reason on hover.
 | Actual start and end | **Actual days are counted from those two** |
 | Actual start and days only | An end date is derived from the actual days (so the bar can be drawn) |
 | An actual end date | **Progress becomes 100%**; this wins over a written value |
+| Planned dates | **The status and delay are calculated** (see below) |
 
 Only an actual end date that is *written in* counts as finished. An end date
 **derived** from the actual days does not (otherwise a task in progress would
 silently become complete). For the same reason, a derived actual end date is
 not written back into the cell when exporting.
+
+#### Status
+
+The status is worked out from a base date (today by default) and written into
+the Status column. The first matching rule wins.
+
+| Condition | Status |
+|-----------|--------|
+| An actual end date is filled in | **Done** |
+| Past the planned start with no actual start, or past the planned end unfinished | **Delayed n d** |
+| Started (an actual start date is filled in) | **Remaining n d** — until the planned end |
+| Not started | **Starts in n d** — until the planned start |
+
+Counts are in working days, and the day itself counts as zero (if today is the
+planned end date, it reads "Remaining 0 d"). The delay is also written into the
+Delay column.
+
+A row with no planned dates cannot be judged, so whatever status was written
+stays. The colours match the original file (done grey, delayed pink,
+remaining orange, upcoming light blue).
 
 ### Exporting with the Gantt chart
 

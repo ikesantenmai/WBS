@@ -172,16 +172,24 @@ def test_a_file_of_either_language_can_be_read_in_either_language(
     assert imported.spec.language == viewed
 
 
-@pytest.mark.parametrize("language", ["ja", "en"])
-def test_status_colours_work_across_languages(tmp_path, make_filled, language):
+@pytest.mark.parametrize("language,expected", [
+    ("ja", ["完了", "遅れ 24 日", "あと 8 日"]),
+    ("en", ["Done", "Delayed 24 d", "Starts in 8 d"]),
+])
+def test_the_status_is_calculated_in_the_language(make_filled, language, expected):
+    base = dt.date(2026, 6, 10)
     path = make_filled("s.xlsx", language=language, rows=[
-        ("開発", "", "1", "A", dt.date(2026, 4, 6), 5, dt.date(2026, 4, 10),
-         None, None, None, None, None, "", "設計", "Done"),
-        ("開発", "", "2", "B", dt.date(2026, 4, 6), 5, dt.date(2026, 4, 10),
-         None, None, None, None, None, "", "設計", "完了"),
+        ("開発", "", "1", "完了", dt.date(2026, 6, 1), 5, dt.date(2026, 6, 5),
+         dt.date(2026, 6, 1), None, dt.date(2026, 6, 5), None, None, "", "設計", ""),
+        ("開発", "", "2", "遅れ", dt.date(2026, 5, 1), 5, dt.date(2026, 5, 7),
+         dt.date(2026, 5, 1), None, None, None, None, "", "設計", ""),
+        ("開発", "", "3", "あと", dt.date(2026, 6, 22), 5, dt.date(2026, 6, 26),
+         None, None, None, None, None, "", "設計", ""),
     ])
-    model = build_chart(read(path, language=language), base_date=dt.date(2026, 4, 8))
-    assert [r["status_bg"] for r in model["rows"]] == ["#C0C0C0", "#C0C0C0"]
+    model = build_chart(read(path, language=language, base_date=base), base_date=base)
+    assert [r["status"] for r in model["rows"]] == expected
+    # 配色は言語によらず同じ
+    assert [r["status_bg"] for r in model["rows"]] == ["#C0C0C0", "#FF99CC", "#CCFFFF"]
 
 
 @pytest.mark.parametrize("language", ["ja", "en"])
