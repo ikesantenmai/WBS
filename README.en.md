@@ -216,15 +216,21 @@ actual.
 | Planned start and days only | The end date is derived from the days |
 | No planned start | **Days are left empty** (there is nothing to count from) |
 | Actual start and end | **Actual days are counted again from those two** |
-| Actual start and days only | An end date is derived from the actual days (so the bar can be drawn) |
+| Actual start and days only (no end) | **Actual days are cleared**; no end date is derived |
 | No actual start | **Actual days are left empty** |
 | An actual end date | **Progress becomes 100% and the status becomes Done**; this wins over written values |
 | Planned dates | **The status and delay are calculated** (see below) |
 
-Only a row with no end date works the other way round: the end date is
-derived from the days that were written, so the bar can be drawn. Counting
-back from that derived end gives the same number, so the days stay as they
-were.
+An end date is derived from the days **for the plan only**. "Start plus n
+days" is the normal way to write a plan, and counting back from the derived
+end gives the same number.
+
+**Actuals never derive one.** Days left on work that has not finished are a
+mistake in the source data, so they are thrown away. Inventing an end date
+there would make both the bar and the progress look further along than they
+are. The actual start date is kept, so the row still reads as started
+(status "Remaining n d" and so on). The actual bar is not drawn until an end
+date is filled in.
 
 **A row with an actual end date written in is always 100% and Done.** That
 holds even if it finished after the planned end, even with no planned dates at

@@ -72,11 +72,17 @@ def test_a_row_without_an_actual_start_has_no_actual_bar(model):
     assert _by_no(model, "301")["plan"] is not None
 
 
-def test_an_unfinished_actual_bar_uses_the_recorded_days(model):
-    """実績終了日が空でも、実績日数からバーの右端を決める。"""
+def test_an_unfinished_actual_row_draws_no_actual_bar(model):
+    """実績終了日が空の行は、実績のバーを描かない。
+
+    終わっていない作業に残った実績日数は元データの書き間違いなので、
+    そこから終了日を作らない (実際より進んで見えてしまうため)。
+    """
     row = _by_no(model, "201")
-    assert "actual_end" in row["derived"]        # 補った値であることが判る
-    assert row["actual"]["x2"] > row["actual"]["x1"]
+    assert row["actual_end"] is None
+    assert row["actual_days"] is None            # 書かれていた日数は捨てる
+    assert row["actual"] is None                 # バーは描かない
+    assert row["actual_start"] == "2026-05-13"   # 着手済みであることは残る
     assert row["progress"] == 0.6                # 完了扱いにはしない
 
 

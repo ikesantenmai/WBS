@@ -313,15 +313,14 @@ class _Writer:
             if not (same and previous.subgroup == row.subgroup):
                 ws[f"{style.COL_SUBGROUP}{at}"] = row.subgroup or None
 
-            # 実績の終了日は、書かれていたものだけを残す。日数から補った値を
-            # 書き戻すと、読み直したときに「完了」と誤解されるため。
-            actual_end = None if "actual_end" in row.derived else row.actual_end
+            # 実績の終了日は書かれていたものだけ (導出はしない)。日数から
+            # 補った値を書き戻すと、読み直したときに「完了」と誤解される。
             for letter, value in (
                 (style.COL_NO, row.no), (style.COL_NAME, row.name),
                 (style.COL_START, row.start), (style.COL_DAYS, row.days),
                 (style.COL_END, row.end),
                 (style.COL_ASTART, row.actual_start), (style.COL_ADAYS, row.actual_days),
-                (style.COL_AEND, actual_end), (style.COL_DELAY, row.delay),
+                (style.COL_AEND, row.actual_end), (style.COL_DELAY, row.delay),
                 (style.COL_PROGRESS, row.progress), (style.COL_EFFORT, row.effort),
                 (style.COL_PRED, row.predecessor), (style.COL_MEMBER, row.member),
                 (style.COL_STATUS, row.status),

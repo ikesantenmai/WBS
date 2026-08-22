@@ -287,15 +287,21 @@ def test_an_actual_end_date_means_one_hundred_percent(make_filled):
     assert "progress" not in running.derived
 
 
-def test_a_derived_actual_end_does_not_mean_finished(make_filled):
-    """実績日数から終了日を補った行は、完了とはみなさない。"""
+def test_actual_days_without_an_end_date_are_cleared(make_filled):
+    """実績の終了日が無いのに日数だけ残っている行は、日数を捨てる。
+
+    終わっていない作業に残った日数は元データの書き間違いなので、
+    そこから実績の終了日を作らない。
+    """
     path = make_filled("r.xlsx", rows=[
         ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
          dt.date(2026, 4, 1), 5, None, 0.5, None, "", "設計", ""),
     ])
     row = read(path).rows[0]
-    assert row.actual_end == dt.date(2026, 4, 7)     # バーを描くために補う
-    assert "actual_end" in row.derived
+    assert row.actual_days is None
+    assert "actual_days" in row.derived
+    assert row.actual_end is None                    # 終了日は作らない
+    assert row.actual_start == dt.date(2026, 4, 1)   # 着手済みなのは残る
     assert row.progress == 0.5                       # 完了扱いにはしない
 
 
@@ -345,8 +351,8 @@ def test_days_alone_without_any_date_are_cleared(make_filled):
     assert row.actual_days is None
 
 
-def test_days_still_derive_a_missing_end_date(make_filled):
-    """終了日が無い行だけは、書かれた日数から終了日を補って残す。"""
+def test_only_the_plan_derives_a_missing_end_date(make_filled):
+    """終了日を日数から補うのは予定だけ。実績は補わず日数を捨てる。"""
     path = make_filled("c3.xlsx", rows=[
         ("開発", "", "1", "終了日なし", dt.date(2026, 4, 1), 10, None,
          dt.date(2026, 4, 1), 5, None, None, None, "", "設計", ""),
@@ -354,8 +360,8 @@ def test_days_still_derive_a_missing_end_date(make_filled):
     row = read(path, base_date=BASE).rows[0]
     assert row.end == dt.date(2026, 4, 14)
     assert row.days == 10                # 補った終了日から数えても同じ
-    assert row.actual_end == dt.date(2026, 4, 7)
-    assert row.actual_days == 5
+    assert row.actual_end is None
+    assert row.actual_days is None
 
 
 def test_recounted_days_are_written_out(make_filled, tmp_path):

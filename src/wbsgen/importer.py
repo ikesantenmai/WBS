@@ -204,9 +204,9 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
     - 実績の終了日が**記入されていれば**、進捗は 100% とみなす
     - 状態は「完了 / 遅れ n 日 / 残り n 日 / あと n 日」を基準日から求める
 
-    終了日が書かれていない行は、代わりに日数から終了日を求める
-    (バーを描くため)。この場合は「終わった」とはみなさない。
-    開始日と終了日が揃わず数え直せない行は、日数を空にする。
+    予定の終了日が書かれていない行は、代わりに日数から終了日を求める。
+    実績では求めず、終了日の無い行の実績日数は空にする。
+    開始日と終了日が揃わず数え直せない行も、日数を空にする。
 
     書かれた値は :attr:`Row.written` に控えてあるので、基準日を変えて
     何度呼んでも同じ結果になる。
@@ -222,12 +222,15 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
         row.derived = set()
 
         # --- 予定 ---
-        _resolve_span(row, calendar, "start", "days", "end")
+        # 終了日が無ければ、書かれた日数から求める (予定はそう書くため)
+        _resolve_span(row, calendar, "start", "days", "end", derive_end=True)
 
         # --- 実績 ---
-        # 終了日が書かれていたかどうかは、補う前に見ておく
         finished = row.is_finished
-        _resolve_span(row, calendar, "actual_start", "actual_days", "actual_end")
+        # 実績は終了日を補わない。終わっていない作業に日数だけ残っている
+        # のは元データの書き間違いなので、その日数は捨てる。
+        _resolve_span(row, calendar, "actual_start", "actual_days", "actual_end",
+                      derive_end=False)
 
         # --- 進捗 ---
         if finished and row.progress != 1.0:
@@ -240,17 +243,20 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
 
 
 def _resolve_span(row: Row, calendar, start_key: str, days_key: str,
-                  end_key: str) -> None:
-    """開始日・日数・終了日のうち、書かれていないものを埋める。
+                  end_key: str, derive_end: bool) -> None:
+    """開始日・日数・終了日のつじつまを合わせる。
 
     日数はセルに書かれた値を使わず、**開始日と終了日から数え直す**
-    (稼働日、両端を含む)。書かれた日数はいったん無かったものとして扱う。
+    (稼働日、両端を含む)。書かれた日数はいったん無かったものとして扱い、
+    数え直せない行では空にする。
 
-    終了日が書かれていない行だけは、逆に書かれた日数から終了日を補う
-    (ガントチャートのバーを描くため)。補った終了日から数え直しても
-    同じ日数になるので、日数は書かれたまま残る。
+    ``derive_end`` は、終了日が無いときに日数から終了日を求めるかどうか。
 
-    どちらの日付も揃わず数え直せない行は、日数を空にする。
+    - **予定** は求める。「開始日 + n 日」と書くのが普通の書き方で、
+      求めた終了日から数え直しても同じ日数になる。
+    - **実績** は求めない。終わっていない作業に日数だけ残っているのは
+      元データの書き間違いなので、その日数は捨てる。ありもしない
+      終了日を作ると、バーも進捗も実際より進んで見えてしまう。
     """
     start = getattr(row, start_key)
     end = getattr(row, end_key)
@@ -258,7 +264,7 @@ def _resolve_span(row: Row, calendar, start_key: str, days_key: str,
 
     if start and end:
         _set(row, days_key, calendar.workdays_between(start, end))
-    elif start and days:
+    elif derive_end and start and days:
         _set(row, end_key, calendar.end_date(start, days))
     else:
         _set(row, days_key, None)

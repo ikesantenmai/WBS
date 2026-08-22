@@ -100,8 +100,8 @@ def test_bars_are_drawn_for_every_row(exported):
     names = _shapes(exported)
     for no in ("101", "102", "201", "202", "301"):
         assert f"plan-{no}" in names
-    # 実績があるのは 101 / 102 / 201 / 202 の 4 行
-    assert sum(1 for n in names if n.startswith("actual-")) == 4
+    # 実績のバーを描くのは、終了日まで入っている 101 / 102 の 2 行
+    assert sum(1 for n in names if n.startswith("actual-")) == 2
     assert "now-line" in names
 
 

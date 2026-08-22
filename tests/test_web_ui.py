@@ -197,7 +197,7 @@ def test_importing_a_workbook_draws_a_gantt_chart(page, filled_book):
 
     # チャートにバーと現在日線が描かれる
     assert page.eval_on_selector_all(
-        "svg.chart-body rect[rx='2']", "n => n.length") >= 8
+        "svg.chart-body rect[rx='2']", "n => n.length") >= 7
     assert page.eval_on_selector_all(
         "svg.chart-body line[stroke-dasharray]", "n => n.length") == 1
 
