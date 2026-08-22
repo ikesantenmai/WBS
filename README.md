@@ -1,13 +1,18 @@
 # wbsgen — WBS ジェネレータ
 
+*[English](README.en.md)*
+
 期間を指定して**空の WBS (ガントチャート用紙)** を Excel で書き出し、
 **記入して戻ってきた Excel をガントチャートで表示**します。
 
 添付の WBS ファイル (`DS_WEB…PJ_WBS….xls`) の書式を解析して、
 月と週の見出し・配色・列構成をそのまま再現しています。
 
+日本語版と英語版があります。**既定は日本語**です。
+
 ```
 wbsgen new --start 2026-04-01 --end 2027-03-31 -o 2026年度WBS.xlsx
+wbsgen new --start 2026-04-01 --months 12 --lang en -o FY2026.xlsx
 wbsgen serve                                    # ブラウザで作る / 見る
 ```
 
@@ -65,6 +70,24 @@ wbsgen serve                                    # ブラウザで作る / 見る
 
 ---
 
+## 言語
+
+画面右上の切り替えで、日本語と英語を行き来できます。**既定は日本語**で、
+選んだ言語はブラウザに憶えます。コマンドでは `--lang en` を付けます。
+
+言語は次のすべてに効きます。
+
+- 画面の文言、日付の見出し (4月 / Apr)、曜日 (月 / Mon)
+- 書き出す Excel のシート名 (スケジュール / Schedule)、列見出し、
+  表示形式 (`m"月"` / `mmm`)、設定シートの項目名
+- エラーメッセージ、コマンドのヘルプと出力
+
+**読み込みは言語を選びません。** 日本語で作ったファイルを英語表示で開くことも、
+その逆もできます (見出しの文字で列を探し、両方の言語の書き方を知っているため)。
+状態の色分けも「完了 / Done」「実行中 / In progress」のどちらでも効きます。
+
+---
+
 ## インストール
 
 ```bash
@@ -82,7 +105,7 @@ Python 3.9 以上。
 wbsgen new --start YYYY-MM-DD [--end YYYY-MM-DD | --period-days N | --months N]
            [-o out.xlsx] [--unit day|week|month] [--rows N] [--title 名前]
            [--member 担当] [--workdays 月,火,水,木,金] [--holiday YYYY-MM-DD]
-           [--no-jp-holidays]
+           [--no-jp-holidays] [--lang ja|en]
 wbsgen serve [--host 127.0.0.1] [--port 8000] [--reload]
 ```
 
@@ -100,6 +123,7 @@ wbsgen serve [--host 127.0.0.1] [--port 8000] [--reload]
 | `--workdays` | 稼働曜日 (既定 `mon,tue,wed,thu,fri`。`月,火,…` でも可) |
 | `--holiday` | 休業日を追加する (複数指定可) |
 | `--no-jp-holidays` | 日本の祝日を休日として扱わない |
+| `--lang` | 表示言語 `ja` / `en` (既定 `ja`) |
 
 ```bash
 # 2026 年度 (週表示・空行 40 行)
@@ -194,6 +218,9 @@ wbsgen serve --host 0.0.0.0 --port 8080
 `/api/import` と `/api/export` はファイルを `multipart/form-data` の `file` で
 受け取ります。`?unit=day` を付けると、ファイルに書かれた表示単位より優先します。
 
+どのエンドポイントも `?lang=en` で英語になります (省略時は日本語)。
+`/api/build` は本文の `language` でも指定できます。
+
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/export?unit=month" \
      -F file=@記入済みWBS.xlsx -o ガント付き.xlsx
@@ -243,7 +270,8 @@ pytest -q
 
 ```
 src/wbsgen/
-  blank.py       用紙の仕様 (期間・単位・空行数・稼働日)
+  i18n.py        日本語版・英語版の文言と表示形式
+  blank.py       用紙の仕様 (期間・単位・空行数・稼働日・言語)
   timeline.py    日程表の横軸と 2 段見出し
   workcal.py     稼働日判定と日本の祝日
   style.py       配色と書式 (添付ファイルから抽出)

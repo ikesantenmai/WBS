@@ -22,9 +22,11 @@ from openpyxl.worksheet.worksheet import Worksheet
 from . import style
 from .blank import BlankWBS
 from .drawing import Drawing, Geometry, Shape
+from .i18n import Labels, labels as get_labels, status_kind
 from .inject import inject_drawing
 from .timeline import UNIT_DAY, Timeline
 
+#: 既定 (日本語) のシート名。英語版では :class:`~wbsgen.i18n.Labels` の値を使う。
 SHEET_PLAN = "スケジュール"
 SHEET_MEMBER = "担当者一覧"
 SHEET_CONFIG = "設定"
@@ -33,35 +35,38 @@ ROW_TITLE = 1
 ROW_BAND = 3        # 上段: 月 (月表示のときは年)
 ROW_HEADER = 4      # 下段: 週の開始日 (日表示は日、月表示は月) / 表側の見出し
 
-#: 表側の列 (列文字, 見出し, グループ見出し)
+#: 表側の列 (属性名, 列文字, グループ)。見出しの文字は言語ごとに差し替える。
 TABLE_COLUMNS = [
-    (style.COL_GROUP, "大項目", ""),
-    (style.COL_SUBGROUP, "中項目", ""),
-    (style.COL_NO, "項番", ""),
-    (style.COL_NAME, "項目", ""),
-    (style.COL_START, "開始日", "予定"),
-    (style.COL_DAYS, "日数", "予定"),
-    (style.COL_END, "終了日", "予定"),
-    (style.COL_ASTART, "開始", "実績"),
-    (style.COL_ADAYS, "日数", "実績"),
-    (style.COL_AEND, "終了", "実績"),
-    (style.COL_DELAY, "遅れ", "実績"),
-    (style.COL_PROGRESS, "進捗", "実績"),
-    (style.COL_EFFORT, "工数", ""),
-    (style.COL_PRED, "先行", ""),
-    (style.COL_MEMBER, "担当", ""),
-    (style.COL_STATUS, "状態", ""),
+    ("group", style.COL_GROUP, None),
+    ("subgroup", style.COL_SUBGROUP, None),
+    ("no", style.COL_NO, None),
+    ("name", style.COL_NAME, None),
+    ("start", style.COL_START, "plan"),
+    ("days", style.COL_DAYS, "plan"),
+    ("end", style.COL_END, "plan"),
+    ("actual_start", style.COL_ASTART, "actual"),
+    ("actual_days", style.COL_ADAYS, "actual"),
+    ("actual_end", style.COL_AEND, "actual"),
+    ("delay", style.COL_DELAY, "actual"),
+    ("progress", style.COL_PROGRESS, "actual"),
+    ("effort", style.COL_EFFORT, None),
+    ("predecessor", style.COL_PRED, None),
+    ("member", style.COL_MEMBER, None),
+    ("status", style.COL_STATUS, None),
 ]
 
-#: 記入欄に入れておく表示形式
+#: 表側の列文字だけ (書式を敷くのに使う)
+TABLE_LETTERS = [letter for _key, letter, _group in TABLE_COLUMNS]
+
+#: 記入欄に入れておく表示形式 (``date`` / ``days`` は言語ごとに差し替える)
 CELL_FORMATS = {
-    style.COL_START: style.FMT_DATE,
-    style.COL_DAYS: style.FMT_DAYS,
-    style.COL_END: style.FMT_DATE,
-    style.COL_ASTART: style.FMT_DATE,
-    style.COL_ADAYS: style.FMT_DAYS,
-    style.COL_AEND: style.FMT_DATE,
-    style.COL_DELAY: style.FMT_DAYS,
+    style.COL_START: "date",
+    style.COL_DAYS: "days",
+    style.COL_END: "date",
+    style.COL_ASTART: "date",
+    style.COL_ADAYS: "days",
+    style.COL_AEND: "date",
+    style.COL_DELAY: "days",
     style.COL_PROGRESS: style.FMT_PERCENT,
     style.COL_EFFORT: style.FMT_EFFORT,
     style.COL_NO: style.FMT_TEXT,
@@ -95,10 +100,12 @@ def export(imported, path, base_date=None) -> Path:
 class _Writer:
     def __init__(self, spec: BlankWBS, rows=None, base_date=None):
         self.spec = spec
+        self.labels: Labels = get_labels(spec.language)
         self.rows = list(rows or [])
         self.base_date = base_date or _dt.date.today()
         self.calendar = spec.calendar()
-        self.timeline = Timeline(spec.start, spec.period_days, spec.unit, self.calendar)
+        self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
+                                 self.calendar, spec.language)
         self.chart_col_px = style.CHART_COL_WIDTH_PX[spec.unit]
         # 日単位表示では見出しの下に曜日の行が入る
         self.first_row = ROW_HEADER + (2 if spec.unit == UNIT_DAY else 1)
@@ -112,10 +119,10 @@ class _Writer:
 
         workbook = Workbook()
         plan = workbook.active
-        plan.title = SHEET_PLAN
+        plan.title = self.labels.sheet_plan
         self._plan_sheet(plan)
-        self._member_sheet(workbook.create_sheet(SHEET_MEMBER))
-        self._config_sheet(workbook.create_sheet(SHEET_CONFIG))
+        self._member_sheet(workbook.create_sheet(self.labels.sheet_member))
+        self._config_sheet(workbook.create_sheet(self.labels.sheet_config))
         workbook.save(path)
 
         drawing = self._gantt()
@@ -135,6 +142,15 @@ class _Writer:
         self._blank_rows(ws)
         ws.freeze_panes = f"{get_column_letter(style.COL_CHART_FIRST)}{self.first_row}"
         ws.sheet_view.showGridLines = False
+
+    def _cell_format(self, letter: str):
+        """記入欄の表示形式。日付と日数は言語ごとに変わる。"""
+        value = CELL_FORMATS.get(letter)
+        if value == "date":
+            return self.labels.date_format
+        if value == "days":
+            return self.labels.days_format
+        return value
 
     def _columns(self, ws: Worksheet) -> None:
         for letter, px in style.COLUMN_WIDTHS_PX.items():
@@ -156,30 +172,31 @@ class _Writer:
         ws.row_dimensions[ROW_HEADER].height = style.ROW_HEIGHT_HEADER
 
         # 上段はグループ見出し (予定 / 実績) を結合して置く
-        for letter, _label, _group in TABLE_COLUMNS:
+        for letter in TABLE_LETTERS:
             self._header_style(ws[f"{letter}{ROW_BAND}"])
         self._header_style(ws[f"{style.COL_SHAPE}{ROW_BAND}"])
-        for group, first, last in self._column_groups():
+        for label, first, last in self._column_groups():
             ws.merge_cells(f"{first}{ROW_BAND}:{last}{ROW_BAND}")
-            ws[f"{first}{ROW_BAND}"].value = group
+            ws[f"{first}{ROW_BAND}"].value = label
 
-        for letter, label, _group in TABLE_COLUMNS:
+        for key, letter, _group in TABLE_COLUMNS:
             cell = ws[f"{letter}{ROW_HEADER}"]
-            cell.value = label
+            cell.value = self.labels.columns[key]
             self._header_style(cell)
         self._header_style(ws[f"{style.COL_SHAPE}{ROW_HEADER}"])
 
     def _column_groups(self):
-        """``(グループ名, 先頭の列文字, 末尾の列文字)`` を返す。"""
+        """``(グループ見出し, 先頭の列文字, 末尾の列文字)`` を返す。"""
+        names = {"plan": self.labels.group_plan, "actual": self.labels.group_actual}
         out = []
-        for letter, _label, group in TABLE_COLUMNS:
+        for _key, letter, group in TABLE_COLUMNS:
             if not group:
                 continue
             if out and out[-1][0] == group:
                 out[-1][2] = letter
             else:
                 out.append([group, letter, letter])
-        return [tuple(entry) for entry in out]
+        return [(names[group], first, last) for group, first, last in out]
 
     def _header_style(self, cell) -> None:
         cell.fill = style.fill(style.C_HEADER)
@@ -232,7 +249,7 @@ class _Writer:
             rest = self.timeline.is_rest_column(col)
             sat = self.timeline.is_saturday_column(col)
             cell = ws.cell(row=row, column=first + col.index,
-                           value=self.timeline.weekday_label(col))
+                           value=self._weekday(col))
             cell.number_format = style.FMT_TEXT
             cell.fill = style.fill(
                 style.C_SATURDAY if sat else (style.C_HOLIDAY if rest else style.C_TIMELINE))
@@ -241,22 +258,19 @@ class _Writer:
             cell.alignment = style.ALIGN_CENTER
             cell.border = style.BORDER_CELL
 
+    def _weekday(self, col) -> str:
+        """曜日の見出し (言語ごと)。"""
+        if self.timeline.unit != UNIT_DAY:
+            return ""
+        return self.labels.weekdays[col.start.weekday()]
+
     # ------------------------------------------------------------------
     def _blank_rows(self, ws: Worksheet) -> None:
         """記入用の空行。罫線と表示形式だけを入れておく。"""
         first = style.COL_CHART_FIRST
         for row in range(self.first_row + len(self.rows), self.last_row + 1):
             ws.row_dimensions[row].height = style.ROW_HEIGHT_TASK
-            for letter, _label, _group in TABLE_COLUMNS:
-                cell = ws[f"{letter}{row}"]
-                cell.fill = style.fill(
-                    style.C_PLAN_CELL if letter in PLAN_COLUMNS else style.C_WHITE)
-                cell.border = style.BORDER_CELL
-                cell.font = style.font(
-                    color=style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000")
-                cell.alignment = style.ALIGN_CENTER
-                if letter in CELL_FORMATS:
-                    cell.number_format = CELL_FORMATS[letter]
+            self._format_row(ws, row)
             ws[f"{style.COL_NAME}{row}"].alignment = style.ALIGN_NAME
             ws[f"{style.COL_GROUP}{row}"].alignment = style.ALIGN_LEFT
             ws[f"{style.COL_SUBGROUP}{row}"].alignment = style.ALIGN_LEFT
@@ -312,7 +326,7 @@ class _Writer:
 
     def _format_row(self, ws: Worksheet, row: int) -> None:
         """1 行ぶんの罫線・色・表示形式を入れる。"""
-        for letter, _label, _group in TABLE_COLUMNS:
+        for letter in TABLE_LETTERS:
             cell = ws[f"{letter}{row}"]
             cell.fill = style.fill(
                 style.C_PLAN_CELL if letter in PLAN_COLUMNS else style.C_WHITE)
@@ -320,18 +334,21 @@ class _Writer:
             cell.font = style.font(
                 color=style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000")
             cell.alignment = style.ALIGN_CENTER
-            if letter in CELL_FORMATS:
-                cell.number_format = CELL_FORMATS[letter]
+            number_format = self._cell_format(letter)
+            if number_format:
+                cell.number_format = number_format
         ws[f"{style.COL_NAME}{row}"].alignment = style.ALIGN_NAME
         for letter in (style.COL_GROUP, style.COL_SUBGROUP, style.COL_MEMBER):
             ws[f"{letter}{row}"].alignment = style.ALIGN_LEFT
 
     def _status_style(self, cell, status: str) -> None:
-        for key, (background, foreground, bold) in style.STATUS_STYLES.items():
-            if status.startswith(key):
-                cell.fill = style.fill(background)
-                cell.font = style.font(color=foreground, bold=bold)
-                return
+        """状態の色。書かれた言葉から種類を判定する (日英どちらでも効く)。"""
+        kind = status_kind(status)
+        if kind is None:
+            return
+        background, foreground, bold = style.STATUS_STYLES[kind]
+        cell.fill = style.fill(background)
+        cell.font = style.font(color=foreground, bold=bold)
 
     def _plan_end(self, row):
         """終了日が空なら、日数 (稼働日) から補う。"""
@@ -457,10 +474,10 @@ class _Writer:
         for letter, px in (("B", 150), ("C", 70), ("D", 220)):
             ws.column_dimensions[letter].width = style.px_to_width(px)
 
-        ws["B2"] = "◆担当者一覧"
+        ws["B2"] = self.labels.member_title
         ws["B2"].font = style.font(11, bold=True, color=style.C_TITLE_FONT)
 
-        for i, label in enumerate(("担当", "色", "備考")):
+        for i, label in enumerate(self.labels.member_headers):
             cell = ws.cell(row=3, column=2 + i, value=label)
             self._header_style(cell)
 
@@ -488,15 +505,15 @@ class _Writer:
         for letter, px in (("B", 170), ("C", 170), ("E", 130)):
             ws.column_dimensions[letter].width = style.px_to_width(px)
 
-        unit_label = {"day": "日単位", "week": "週単位", "month": "月単位"}[self.spec.unit]
+        text = self.labels
         entries = [
-            ("チャート表示開始日", self.timeline.start),
-            ("チャート表示終了日", self.timeline.end),
-            ("チャート表示期間(日)", self.spec.period_days),
-            ("チャート表示単位", unit_label),
-            ("記入用の空行", self.spec.rows),
+            (text.config_start, self.timeline.start),
+            (text.config_end, self.timeline.end),
+            (text.config_period, self.spec.period_days),
+            (text.config_unit, text.units[self.spec.unit]),
+            (text.config_rows, self.spec.rows),
         ]
-        ws["B2"] = "◆チャート表示設定"
+        ws["B2"] = text.config_chart
         ws["B2"].font = style.font(11, bold=True, color=style.C_TITLE_FONT)
         row = 3
         for label, value in entries:
@@ -504,17 +521,17 @@ class _Writer:
             row += 1
 
         row += 1
-        ws.cell(row=row, column=2, value="◆作業日設定").font = style.font(
+        ws.cell(row=row, column=2, value=text.config_workdays).font = style.font(
             11, bold=True, color=style.C_TITLE_FONT)
         row += 1
-        for index, name in enumerate(
-                ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")):
+        for index, name in enumerate(text.weekday_names):
             self._config_row(ws, row, name,
-                             "出" if index in self.calendar.workdays else "休")
+                             text.work_on if index in self.calendar.workdays
+                             else text.work_off)
             row += 1
 
         # 休日一覧
-        ws.cell(row=2, column=5, value="◆休日一覧").font = style.font(
+        ws.cell(row=2, column=5, value=text.config_holidays).font = style.font(
             11, bold=True, color=style.C_TITLE_FONT)
         holidays = self.calendar.holidays_between(self.timeline.start, self.timeline.end)
         for i, day in enumerate(holidays):

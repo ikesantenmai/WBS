@@ -10,6 +10,7 @@ import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Sequence
 
+from .i18n import DEFAULT_LANGUAGE, LANGUAGES, labels, message, normalize
 from .timeline import UNIT_WEEK, VALID_UNITS
 from .workcal import (
     DEFAULT_WORKDAYS,
@@ -42,6 +43,13 @@ class BlankWBS:
     workdays: list = field(default_factory=lambda: list(DEFAULT_WORKDAYS))
     japanese_holidays: bool = True
     holidays: list = field(default_factory=list)
+    #: 表示言語 ("ja" / "en")
+    language: str = DEFAULT_LANGUAGE
+
+    @property
+    def labels(self):
+        """この言語の文言と表示形式。"""
+        return labels(self.language)
 
     @property
     def end(self) -> _dt.date:
@@ -85,20 +93,23 @@ def build(
     workdays: Optional[Sequence[str]] = None,
     japanese_holidays: bool = True,
     holidays: Optional[Sequence[_dt.date]] = None,
+    language: str = DEFAULT_LANGUAGE,
 ) -> BlankWBS:
     """期間を指定して :class:`BlankWBS` を組み立てる。
 
     期間は ``end`` / ``period_days`` / ``months`` のどれかで指定する。
     いずれも省略した場合は 12 か月。
     """
+    lang = normalize(language)
     if not isinstance(start, _dt.date):
-        raise SpecError("開始日を指定してください。")
+        raise SpecError(message(lang, "need_start"))
     if unit not in VALID_UNITS:
-        raise SpecError(f"表示単位が不正です: {unit!r} ({'/'.join(VALID_UNITS)})")
+        raise SpecError(message(lang, "bad_unit", value=unit,
+                                choices="/".join(VALID_UNITS)))
 
     if end is not None:
         if end < start:
-            raise SpecError(f"終了日が開始日より前です: {start} 〜 {end}")
+            raise SpecError(message(lang, "end_before_start", start=start, end=end))
         days = (end - start).days + 1
     elif period_days is not None:
         days = int(period_days)
@@ -106,24 +117,27 @@ def build(
         days = (add_months(start, months or DEFAULT_MONTHS) - start).days
 
     if days < 1:
-        raise SpecError(f"期間は 1 日以上で指定してください: {days}")
+        raise SpecError(message(lang, "period_too_short", days=days))
     if days > MAX_PERIOD_DAYS:
-        raise SpecError(f"期間が長すぎます (上限 10 年): {days} 日")
+        raise SpecError(message(lang, "period_too_long", days=days))
     if not 0 <= rows <= MAX_ROWS:
-        raise SpecError(f"行数は 0〜{MAX_ROWS} の範囲で指定してください: {rows}")
+        raise SpecError(message(lang, "bad_rows", maximum=MAX_ROWS, value=rows))
 
     names = [str(m).strip() for m in (members or []) if str(m).strip()]
     if len(names) > MAX_MEMBERS:
-        raise SpecError(f"担当者は {MAX_MEMBERS} 人までです: {len(names)} 人")
+        raise SpecError(message(lang, "too_many_members",
+                                maximum=MAX_MEMBERS, value=len(names)))
 
     day_keys = list(workdays) if workdays else list(DEFAULT_WORKDAYS)
-    try:
-        parse_weekdays(day_keys)
-    except ValueError as exc:
-        raise SpecError(str(exc))
+    for key in day_keys:
+        try:
+            parse_weekdays([key])
+        except ValueError:
+            raise SpecError(message(lang, "bad_weekday", value=key))
 
     return BlankWBS(
-        title=(title or "").strip() or f"{start.year}年 スケジュール",
+        title=(title or "").strip()
+              or labels(lang).default_title.format(year=start.year),
         start=start,
         period_days=days,
         unit=unit,
@@ -132,6 +146,7 @@ def build(
         workdays=day_keys,
         japanese_holidays=japanese_holidays,
         holidays=sorted(set(holidays or [])),
+        language=lang,
     )
 
 
@@ -149,45 +164,49 @@ def to_dict(spec: BlankWBS) -> Dict[str, Any]:
         "workdays": list(spec.workdays),
         "japanese_holidays": spec.japanese_holidays,
         "holidays": [d.isoformat() for d in spec.holidays],
+        "language": spec.language,
     }
 
 
-def from_dict(data: Dict[str, Any]) -> BlankWBS:
+def from_dict(data: Dict[str, Any], language: str = DEFAULT_LANGUAGE) -> BlankWBS:
     """辞書 (JSON) から組み立てる。日付は ``YYYY-MM-DD``。"""
     if not isinstance(data, dict):
-        raise SpecError("指定はマッピングである必要があります。")
+        raise SpecError(message(language, "not_mapping"))
+    lang = normalize(data.get("language") or language)
     return build(
-        start=parse_date(data.get("start"), "start"),
-        end=parse_date(data["end"], "end") if data.get("end") else None,
-        period_days=_int(data.get("period_days"), "period_days"),
-        months=_int(data.get("months"), "months"),
+        start=parse_date(data.get("start"), "start", lang),
+        end=parse_date(data["end"], "end", lang) if data.get("end") else None,
+        period_days=_int(data.get("period_days"), "period_days", lang),
+        months=_int(data.get("months"), "months", lang),
         unit=str(data.get("unit", UNIT_WEEK)),
-        rows=_int(data.get("rows"), "rows") if data.get("rows") is not None else DEFAULT_ROWS,
+        rows=(_int(data.get("rows"), "rows", lang)
+              if data.get("rows") is not None else DEFAULT_ROWS),
         title=data.get("title"),
         members=data.get("members") or [],
         workdays=data.get("workdays") or None,
         japanese_holidays=bool(data.get("japanese_holidays", True)),
-        holidays=[parse_date(d, "holidays") for d in (data.get("holidays") or [])],
+        holidays=[parse_date(d, "holidays", lang) for d in (data.get("holidays") or [])],
+        language=lang,
     )
 
 
-def parse_date(value, field_name: str) -> _dt.date:
+def parse_date(value, field_name: str, language: str = DEFAULT_LANGUAGE) -> _dt.date:
     if isinstance(value, _dt.datetime):
         return value.date()
     if isinstance(value, _dt.date):
         return value
     if not value:
-        raise SpecError(f"{field_name} を指定してください (YYYY-MM-DD)。")
+        raise SpecError(message(language, "need_date", field=field_name))
     try:
         return _dt.datetime.strptime(str(value).strip().replace("/", "-"), "%Y-%m-%d").date()
     except ValueError:
-        raise SpecError(f"{field_name} は YYYY-MM-DD 形式で指定してください: {value!r}")
+        raise SpecError(message(language, "bad_date", field=field_name, value=value))
 
 
-def _int(value, field_name: str) -> Optional[int]:
+def _int(value, field_name: str, language: str = DEFAULT_LANGUAGE) -> Optional[int]:
     if value in (None, ""):
         return None
     try:
         return int(value)
     except (TypeError, ValueError):
-        raise SpecError(f"{field_name} は整数で指定してください: {value!r}")
+        raise SpecError(message(language, "bad_int", field=field_name, value=value))

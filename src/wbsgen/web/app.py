@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
+from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
 from ..importer import read as read_workbook
 from ..timeline import VALID_UNITS, Timeline
 from ..workcal import WEEKDAY_JP, WEEKDAY_KEYS
@@ -34,45 +35,65 @@ app = FastAPI(
 )
 
 
-def _spec(payload: Dict[str, Any]) -> BlankWBS:
+def _spec(payload: Dict[str, Any], language: str = DEFAULT_LANGUAGE) -> BlankWBS:
     try:
-        return from_dict(payload)
+        return from_dict(payload, language=language)
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+def _language(value, payload: Optional[Dict[str, Any]] = None) -> str:
+    """クエリ、なければ本文から言語を決める。"""
+    if value:
+        return normalize(value)
+    if payload:
+        return normalize(payload.get("language"))
+    return DEFAULT_LANGUAGE
+
+
 # ----------------------------------------------------------------------
 @app.get("/api/meta")
-def meta() -> Dict[str, Any]:
+def meta(lang: Optional[str] = Query(None, description="表示言語 (ja/en)")) -> Dict[str, Any]:
     """画面が選択肢を組み立てるためのメタ情報。"""
+    language = normalize(lang)
+    text = get_labels(language)
     today = _dt.date.today()
+    # 年度 (4 月始まり) を既定の期間として提案する
     year = today.year if today.month >= 4 else today.year - 1
     return {
         "version": __version__,
-        "units": [
-            {"value": "day", "label": "日単位"},
-            {"value": "week", "label": "週単位"},
-            {"value": "month", "label": "月単位"},
+        "language": language,
+        "languages": [
+            {"value": "ja", "label": "日本語"},
+            {"value": "en", "label": "English"},
         ],
-        "weekdays": [{"value": k, "label": j} for k, j in zip(WEEKDAY_KEYS, WEEKDAY_JP)],
+        "units": [{"value": key, "label": text.units[key]} for key in ("day", "week", "month")],
+        "weekdays": [
+            {"value": key, "label": label}
+            for key, label in zip(WEEKDAY_KEYS, text.weekdays)
+        ],
         "default_rows": DEFAULT_ROWS,
         "max_rows": MAX_ROWS,
         "today": today.isoformat(),
-        # 年度 (4 月始まり) を既定の期間として提案する
         "suggested": {
             "start": f"{year}-04-01",
             "end": f"{year + 1}-03-31",
-            "title": f"{year}年度 スケジュール",
+            "title": (f"{year}年度 スケジュール" if language == "ja"
+                      else f"FY{year} Schedule"),
         },
     }
 
 
 @app.post("/api/preview")
-def preview(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+def preview(
+    payload: Dict[str, Any] = Body(...),
+    lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+) -> Dict[str, Any]:
     """日程表の見出しと寸法を返す (画面のプレビュー用)。"""
-    spec = _spec(payload)
+    language = _language(lang, payload)
+    spec = _spec({**payload, "language": language}, language)
     calendar = spec.calendar()
-    timeline = Timeline(spec.start, spec.period_days, spec.unit, calendar)
+    timeline = Timeline(spec.start, spec.period_days, spec.unit, calendar, spec.language)
     return {
         "spec": to_dict(spec),
         "timeline": {
@@ -82,7 +103,7 @@ def preview(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             "columns": [
                 {
                     "label": timeline.column_label(col),
-                    "weekday": timeline.weekday_label(col),
+                    "weekday": _weekday(timeline, spec, col),
                     "start": col.start.isoformat(),
                     "rest": timeline.is_rest_column(col),
                     "saturday": timeline.is_saturday_column(col),
@@ -102,10 +123,21 @@ def preview(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     }
 
 
+def _weekday(timeline, spec: BlankWBS, col) -> str:
+    """曜日の見出し (言語ごと)。日単位以外は空。"""
+    if timeline.unit != "day":
+        return ""
+    return get_labels(spec.language).weekdays[col.start.weekday()]
+
+
 @app.post("/api/build")
-def build_workbook(payload: Dict[str, Any] = Body(...)) -> Response:
+def build_workbook(
+    payload: Dict[str, Any] = Body(...),
+    lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+) -> Response:
     """Excel を生成して返す。"""
-    spec = _spec(payload)
+    language = _language(lang, payload)
+    spec = _spec({**payload, "language": language}, language)
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "wbs.xlsx"
         workbook.write(spec, path)
@@ -121,6 +153,10 @@ def build_workbook(payload: Dict[str, Any] = Body(...)) -> Response:
     )
 
 
+def _chart_suffix(spec: BlankWBS) -> str:
+    return "_ガント" if spec.language == "ja" else "_gantt"
+
+
 def _filename(spec: BlankWBS, suffix: str = "") -> str:
     stem = "".join(c for c in spec.title if c not in '\\/:*?"<>|').strip()
     return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.xlsx")
@@ -131,43 +167,42 @@ def _filename(spec: BlankWBS, suffix: str = "") -> str:
 async def import_workbook(
     file: UploadFile = File(...),
     unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
+    lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
 ) -> Dict[str, Any]:
     """記入済みの Excel を読み込み、ガントチャートの描画モデルを返す。
 
     ``unit`` を渡すと、ファイルに書かれた表示単位より優先する
     (同じ内容を日/週/月で見比べるため)。
     """
-    return build_chart(await _read_upload(file, unit))
+    return build_chart(await _read_upload(file, unit, normalize(lang)))
 
 
-async def _read_upload(file: UploadFile, unit: Optional[str]):
+async def _read_upload(file: UploadFile, unit: Optional[str], language: str):
     """アップロードされた Excel を読み込む (import / export で共通)。"""
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="ファイルが大きすぎます (上限 8MB)")
+        raise HTTPException(status_code=413, detail=message(
+            language, "upload_too_large", limit=MAX_UPLOAD_BYTES // (1024 * 1024)))
 
     name = Path(file.filename or "wbs.xlsx").name
-    if Path(name).suffix.lower() not in (".xlsx", ".xlsm"):
-        raise HTTPException(
-            status_code=415,
-            detail=f"対応していない形式です: {Path(name).suffix or '(拡張子なし)'}"
-                   " — .xlsx を指定してください",
-        )
+    suffix = Path(name).suffix.lower()
+    if suffix not in (".xlsx", ".xlsm"):
+        raise HTTPException(status_code=415, detail=message(
+            language, "unsupported_format",
+            suffix=suffix or message(language, "no_suffix")))
     try:
-        imported = read_workbook(io.BytesIO(raw), filename=name)
+        imported = read_workbook(io.BytesIO(raw), filename=name, language=language)
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
     if unit:
         if unit not in VALID_UNITS:
-            raise HTTPException(status_code=422, detail=f"表示単位が不正です: {unit}")
+            raise HTTPException(status_code=422, detail=message(
+                language, "bad_unit", value=unit, choices="/".join(VALID_UNITS)))
         imported.spec.unit = unit
 
     if not imported.rows:
-        raise HTTPException(
-            status_code=422,
-            detail="記入された行が見つかりません。項目と日付を入れてから読み込んでください。",
-        )
+        raise HTTPException(status_code=422, detail=message(language, "no_rows"))
     return imported
 
 
@@ -175,12 +210,13 @@ async def _read_upload(file: UploadFile, unit: Optional[str]):
 async def export_workbook(
     file: UploadFile = File(...),
     unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
+    lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
 ) -> Response:
     """記入済みの Excel を読み込み、ガントチャートを描き込んで返す。
 
     画面に出しているのと同じバーを、浮動図形として書き込む。
     """
-    imported = await _read_upload(file, unit)
+    imported = await _read_upload(file, unit, normalize(lang))
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "wbs.xlsx"
         workbook.export(imported, path)
@@ -192,7 +228,7 @@ async def export_workbook(
         headers={
             "Content-Disposition":
                 f"attachment; filename=wbs.xlsx;"
-                f" filename*=UTF-8''{_filename(imported.spec, '_ガント')}",
+                f" filename*=UTF-8''{_filename(imported.spec, _chart_suffix(imported.spec))}",
         },
     )
 

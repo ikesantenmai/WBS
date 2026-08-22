@@ -242,3 +242,82 @@ def test_export_rejects_an_empty_workbook(client, tmp_path):
         response = client.post("/api/export", files={"file": ("blank.xlsx", handle.read(), "x")})
     assert response.status_code == 422
     assert "記入された行が見つかりません" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------- 言語
+def test_meta_is_japanese_by_default(client):
+    body = client.get("/api/meta").json()
+    assert body["language"] == "ja"
+    assert [u["label"] for u in body["units"]] == ["日単位", "週単位", "月単位"]
+    assert [w["label"] for w in body["weekdays"]][:3] == ["月", "火", "水"]
+    assert [l["value"] for l in body["languages"]] == ["ja", "en"]
+
+
+def test_meta_can_be_english(client):
+    body = client.get("/api/meta", params={"lang": "en"}).json()
+    assert body["language"] == "en"
+    assert [u["label"] for u in body["units"]] == ["Daily", "Weekly", "Monthly"]
+    assert [w["label"] for w in body["weekdays"]][:3] == ["Mon", "Tue", "Wed"]
+    assert body["suggested"]["title"].startswith("FY")
+
+
+def test_an_unknown_language_falls_back_to_japanese(client):
+    assert client.get("/api/meta", params={"lang": "fr"}).json()["language"] == "ja"
+
+
+@pytest.mark.parametrize("params,months", [
+    ({}, ["4月", "5月"]),
+    ({"lang": "en"}, ["Apr", "May"]),
+])
+def test_preview_headings_follow_the_language(client, params, months):
+    body = client.post("/api/preview", params=params,
+                       json={"start": "2026-04-01", "months": 3}).json()
+    assert [b["label"] for b in body["timeline"]["bands"]][:2] == months
+
+
+def test_preview_weekdays_follow_the_language(client):
+    body = client.post("/api/preview", params={"lang": "en"},
+                       json={"start": "2026-04-01", "months": 1, "unit": "day"}).json()
+    assert body["timeline"]["columns"][0]["weekday"] == "Wed"
+
+
+@pytest.mark.parametrize("params,fragment", [
+    ({}, "終了日が開始日より前"),
+    ({"lang": "en"}, "end date is before"),
+])
+def test_api_errors_follow_the_language(client, params, fragment):
+    response = client.post("/api/preview", params=params,
+                           json={"start": "2026-04-01", "end": "2020-01-01"})
+    assert response.status_code == 422
+    assert fragment in response.json()["detail"]
+
+
+@pytest.mark.parametrize("params,sheets", [
+    ({}, ["スケジュール", "担当者一覧", "設定"]),
+    ({"lang": "en"}, ["Schedule", "Members", "Settings"]),
+])
+def test_build_writes_the_requested_language(client, params, sheets):
+    response = client.post("/api/build", params=params, json=SPEC)
+    assert openpyxl.load_workbook(io.BytesIO(response.content)).sheetnames == sheets
+
+
+def test_the_language_can_come_from_the_body(client):
+    response = client.post("/api/build", json={**SPEC, "language": "en"})
+    assert openpyxl.load_workbook(io.BytesIO(response.content)).sheetnames[0] == "Schedule"
+
+
+@pytest.mark.parametrize("lang", ["ja", "en"])
+def test_import_works_in_either_language(client, filled_book, lang):
+    with open(filled_book, "rb") as handle:
+        body = client.post("/api/import", params={"lang": lang},
+                           files={"file": ("filled.xlsx", handle.read(), "x")}).json()
+    assert body["language"] == lang
+    assert len(body["rows"]) == 5
+
+
+@pytest.mark.parametrize("lang,marker", [("ja", "%E3%82%AC%E3%83%B3%E3%83%88"), ("en", "gantt")])
+def test_export_filename_follows_the_language(client, filled_book, lang, marker):
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", params={"lang": lang},
+                               files={"file": ("filled.xlsx", handle.read(), "x")})
+    assert marker in response.headers["content-disposition"]

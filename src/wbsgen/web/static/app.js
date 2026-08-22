@@ -6,24 +6,173 @@
 'use strict';
 
 // Excel の列幅に合わせたプレビューの列幅 (px)
+// Excel の列幅に合わせたプレビューの列幅 (px)。見出しは言語ごとに引く。
 const TABLE_COLUMNS = [
-  { key: 'group', label: '大項目', width: 74, cls: 'group' },
-  { key: 'subgroup', label: '中項目', width: 74, cls: 'subgroup' },
-  { key: 'no', label: '項番', width: 38 },
-  { key: 'name', label: '項目', width: 168, cls: 'name' },
-  { key: 'start', label: '開始日', width: 46, group: '予定', plan: true },
-  { key: 'days', label: '日数', width: 38, group: '予定', plan: true },
-  { key: 'end', label: '終了日', width: 46, group: '予定', plan: true },
-  { key: 'actual_start', label: '開始', width: 42, group: '実績' },
-  { key: 'actual_days', label: '日数', width: 38, group: '実績' },
-  { key: 'actual_end', label: '終了', width: 42, group: '実績' },
-  { key: 'delay', label: '遅れ', width: 38, group: '実績' },
-  { key: 'progress', label: '進捗', width: 38, group: '実績' },
-  { key: 'effort', label: '工数', width: 38 },
-  { key: 'predecessor', label: '先行', width: 38 },
-  { key: 'member', label: '担当', width: 56, cls: 'member' },
-  { key: 'status', label: '状態', width: 62, cls: 'status' },
+  { key: 'group', width: 74, cls: 'group' },
+  { key: 'subgroup', width: 74, cls: 'subgroup' },
+  { key: 'no', width: 38 },
+  { key: 'name', width: 168, cls: 'name' },
+  { key: 'start', width: 46, group: 'plan', plan: true },
+  { key: 'days', width: 38, group: 'plan', plan: true },
+  { key: 'end', width: 46, group: 'plan', plan: true },
+  { key: 'actual_start', width: 42, group: 'actual' },
+  { key: 'actual_days', width: 38, group: 'actual' },
+  { key: 'actual_end', width: 42, group: 'actual' },
+  { key: 'delay', width: 38, group: 'actual' },
+  { key: 'progress', width: 38, group: 'actual' },
+  { key: 'effort', width: 38 },
+  { key: 'predecessor', width: 38 },
+  { key: 'member', width: 56, cls: 'member' },
+  { key: 'status', width: 62, cls: 'status' },
 ];
+
+// 画面の文言。既定は日本語。
+const UI = {
+  ja: {
+    app_title: 'WBS ジェネレータ',
+    tagline_blank: '期間を指定すると、日程表と記入用の空行だけの Excel を書き出します。',
+    tagline_chart: '記入済みの WBS をガントチャートで表示しています。',
+    import: 'Excel を読み込む',
+    back: '新規作成に戻る',
+    export: 'ガントチャート付きで書き出す',
+    download: 'Excel をダウンロード',
+    section_period: '期間',
+    section_sheet: '用紙',
+    section_calendar: '稼働日',
+    section_members: '担当者一覧に載せる名前',
+    field_title: 'プロジェクト名',
+    field_start: '開始日',
+    field_end: '終了日',
+    field_months: '月数',
+    field_unit: '日程表の単位',
+    field_rows: '記入用の空行',
+    field_jp_holidays: '日本の祝日を休みにする',
+    field_holidays: '休業日を追加',
+    field_members: '担当者',
+    members_note: '1 行に 1 人。空でもかまいません。',
+    members_placeholder: '設計\n製造\nテスト',
+    mode_end: '終了日で指定',
+    mode_months: '月数で指定',
+    preview: 'プレビュー',
+    chart: 'ガントチャート',
+    chart_unit: '表示単位',
+    hint_blank: '実際の Excel と同じ列・同じ見出しです',
+    hint_chart: '記入済みの Excel を読み込んで表示しています',
+    columns: {
+      group: '大項目', subgroup: '中項目', no: '項番', name: '項目',
+      start: '開始日', days: '日数', end: '終了日',
+      actual_start: '開始', actual_days: '日数', actual_end: '終了',
+      delay: '遅れ', progress: '進捗',
+      effort: '工数', predecessor: '先行', member: '担当', status: '状態',
+    },
+    group_plan: '予定',
+    group_actual: '実績',
+    totals: {
+      rows: '行数', done: '完了', running: '進行中', delayed: '遅延',
+      progress: '全体進捗', effort: '工数', period: '期間',
+    },
+    unit_effort: '人日',
+    unit_days: '日',
+    holidays_some: 'この期間の祝日・休業日は {n} 日です。',
+    holidays_none: 'この期間に祝日・休業日はありません。',
+    info_blank: '{start} 〜 {end} / {columns} 列 / 空行 {rows} 行',
+    info_chart: '{start} 〜 {end} / {columns} 列 / {rows} 行',
+    info_limited: '（先頭 {n} 行を表示）',
+    warning_title: '読み飛ばした行があります',
+    derived_end: '日数から補った終了日',
+    imported: '{name} を読み込みました。',
+    saved: '{name} を書き出しました。',
+    cannot_import: '読み込めません: {reason}',
+    cannot_save: '書き出せません: {reason}',
+    cannot_start: '起動できません: {reason}',
+    fix_input: '指定を直してください。',
+    tip_plan: '予定 {start} 〜 {end}',
+    tip_actual: '実績 {start} 〜 {end}',
+    tip_running: '進行中',
+    tip_progress: '進捗 {value}%',
+    tip_member: '担当 {value}',
+    tip_status: '状態 {value}',
+  },
+  en: {
+    app_title: 'WBS Generator',
+    tagline_blank: 'Choose a period and download an Excel file with the calendar and blank rows.',
+    tagline_chart: 'Showing a filled-in WBS as a Gantt chart.',
+    import: 'Import Excel',
+    back: 'Back to new sheet',
+    export: 'Export with Gantt chart',
+    download: 'Download Excel',
+    section_period: 'Period',
+    section_sheet: 'Sheet',
+    section_calendar: 'Working days',
+    section_members: 'Owners for the members sheet',
+    field_title: 'Project name',
+    field_start: 'Start date',
+    field_end: 'End date',
+    field_months: 'Months',
+    field_unit: 'Calendar unit',
+    field_rows: 'Blank rows',
+    field_jp_holidays: 'Treat Japanese public holidays as days off',
+    field_holidays: 'Extra days off',
+    field_members: 'Owners',
+    members_note: 'One name per line. May be left empty.',
+    members_placeholder: 'Design\nBuild\nTest',
+    mode_end: 'By end date',
+    mode_months: 'By months',
+    preview: 'Preview',
+    chart: 'Gantt chart',
+    chart_unit: 'Unit',
+    hint_blank: 'The same columns and headers as the Excel file',
+    hint_chart: 'Imported from a filled-in Excel file',
+    columns: {
+      group: 'Group', subgroup: 'Sub-group', no: 'No.', name: 'Task',
+      start: 'Start', days: 'Days', end: 'End',
+      actual_start: 'Start', actual_days: 'Days', actual_end: 'End',
+      delay: 'Delay', progress: 'Progress',
+      effort: 'Effort', predecessor: 'Pred.', member: 'Owner', status: 'Status',
+    },
+    group_plan: 'Planned',
+    group_actual: 'Actual',
+    totals: {
+      rows: 'Rows', done: 'Done', running: 'In progress', delayed: 'Delayed',
+      progress: 'Overall', effort: 'Effort', period: 'Period',
+    },
+    unit_effort: 'person-days',
+    unit_days: 'd',
+    holidays_some: '{n} public holidays / days off in this period.',
+    holidays_none: 'No public holidays or days off in this period.',
+    info_blank: '{start} - {end} / {columns} columns / {rows} blank rows',
+    info_chart: '{start} - {end} / {columns} columns / {rows} rows',
+    info_limited: ' (showing the first {n})',
+    warning_title: 'Some rows were skipped',
+    derived_end: 'End date derived from the number of days',
+    imported: 'Imported {name}.',
+    saved: 'Saved {name}.',
+    cannot_import: 'Cannot import: {reason}',
+    cannot_save: 'Cannot save: {reason}',
+    cannot_start: 'Cannot start: {reason}',
+    fix_input: 'Please correct the settings.',
+    tip_plan: 'Planned {start} - {end}',
+    tip_actual: 'Actual {start} - {end}',
+    tip_running: 'in progress',
+    tip_progress: 'Progress {value}%',
+    tip_member: 'Owner {value}',
+    tip_status: 'Status {value}',
+  },
+};
+
+const LANGUAGE_KEY = 'wbsgen.language';
+const DEFAULT_LANGUAGE = 'ja';
+
+let language = DEFAULT_LANGUAGE;
+
+/** 現在の言語の文言。``{key}`` を values で置き換える。 */
+function t(key, values = {}) {
+  const table = UI[language] || UI[DEFAULT_LANGUAGE];
+  const raw = table[key];
+  if (typeof raw !== 'string') return raw;
+  return raw.replace(/\{(\w+)\}/g, (_m, name) => (
+    values[name] === undefined ? `{${name}}` : values[name]));
+}
 
 const CHART_WIDTH = { day: 22, week: 42, month: 58 };
 const ROW_H = 24;
@@ -37,6 +186,7 @@ let workdays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 let mode = 'blank';        // 'blank' = 新規作成 / 'chart' = 読み込んだ WBS
 let pending = null;
 let loadedFile = null;     // 読み込み中のファイル (単位を変えて読み直すため)
+let suggestedTitle = '';   // 提案したプロジェクト名 (書き換えられたか判る)
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, attrs = {}, ...kids) => {
@@ -86,6 +236,7 @@ async function api(path, options = {}) {
 function currentSpec() {
   const selected = document.querySelector('input[name=mode]:checked').value;
   const spec = {
+    language,
     title: $('#title').value.trim(),
     start: $('#start').value,
     unit: $('#unit').value,
@@ -113,7 +264,7 @@ async function refresh() {
   const controller = new AbortController();
   pending = controller;
   try {
-    const response = await api('/api/preview', {
+    const response = await api(`/api/preview?lang=${language}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(currentSpec()),
@@ -129,18 +280,20 @@ async function refresh() {
       nowX: null,
       totals: null,
       warnings: [],
-      info: `${model.spec.start} 〜 ${model.spec.end}`
-            + ` / ${model.timeline.columns.length} 列 / 空行 ${model.spec.rows} 行`,
+      info: t('info_blank', {
+        start: model.spec.start, end: model.spec.end,
+        columns: model.timeline.columns.length, rows: model.spec.rows,
+      }),
     });
     $('#holiday-note').textContent = model.holidays.length
-      ? `この期間の祝日・休業日は ${model.holidays.length} 日です。`
-      : 'この期間に祝日・休業日はありません。';
+      ? t('holidays_some', { n: model.holidays.length })
+      : t('holidays_none');
     $('#btn-build').disabled = false;
   } catch (error) {
     if (error.name === 'AbortError') return;
     banner(error.message);
     $('#preview-info').textContent = '';
-    $('#sheet').replaceChildren(el('p', { class: 'empty-note', text: '指定を直してください。' }));
+    $('#sheet').replaceChildren(el('p', { class: 'empty-note', text: t('fix_input') }));
     $('#btn-build').disabled = true;
   } finally {
     if (pending === controller) pending = null;
@@ -180,13 +333,14 @@ function render(view) {
   parts.push(grid);
   $('#sheet').replaceChildren(...parts);
 
-  $('#preview-info').textContent = view.info;
+  const limited = view.blankRows > rowCount ? t('info_limited', { n: rowCount }) : '';
+  $('#preview-info').textContent = view.info + limited;
   renderTotals(view.totals);
 }
 
 function warningBox(warnings) {
   return el('div', { class: 'warnings' },
-    el('strong', { text: '読み飛ばした行があります' }),
+    el('strong', { text: t('warning_title') }),
     el('ul', {}, ...warnings.slice(0, 5).map((w) => el('li', { text: w }))));
 }
 
@@ -203,11 +357,13 @@ function buildTable(view, rowCount, withWeekday) {
     let span = 1;
     while (i + span < TABLE_COLUMNS.length
            && (TABLE_COLUMNS[i + span].group || '') === group) span++;
-    bandRow.append(el('th', { colspan: span, text: group }));
+    const label = group ? t(group === 'plan' ? 'group_plan' : 'group_actual') : '';
+    bandRow.append(el('th', { colspan: span, text: label }));
     i += span;
   }
   head.append(bandRow);
-  head.append(el('tr', {}, ...TABLE_COLUMNS.map((c) => el('th', { text: c.label }))));
+  head.append(el('tr', {}, ...TABLE_COLUMNS.map(
+    (c) => el('th', { text: t('columns')[c.key] }))));
   if (withWeekday) {
     head.append(el('tr', {}, ...TABLE_COLUMNS.map(() => el('th', {}))));
   }
@@ -240,14 +396,14 @@ function tableCell(row, column, previous) {
   }
   if (column.key === 'progress') value = value == null ? '' : `${Math.round(value * 100)}%`;
   else if (['days', 'actual_days', 'delay'].includes(column.key)) {
-    value = value == null ? '' : `${value} 日`;
+    value = value == null ? '' : `${value} ${t('unit_days')}`;
   } else if (/start|end$/.test(column.key)) {
     if (column.key === 'end' && row.end_derived) td.classList.add('derived');
     value = shortDate(value);
   } else if (value == null) value = '';
 
   td.textContent = value;
-  if (column.key === 'end' && row.end_derived) td.title = '日数から補った終了日';
+  if (column.key === 'end' && row.end_derived) td.title = t('derived_end');
   return td;
 }
 
@@ -400,11 +556,17 @@ function bars(row, index, colW) {
 function tooltip(row) {
   const node = svg('title');
   const lines = [row.name];
-  if (row.start) lines.push(`予定 ${row.start} 〜 ${row.end || '-'}`);
-  if (row.actual_start) lines.push(`実績 ${row.actual_start} 〜 ${row.actual_end || '進行中'}`);
-  if (row.progress != null) lines.push(`進捗 ${Math.round(row.progress * 100)}%`);
-  if (row.member) lines.push(`担当 ${row.member}`);
-  if (row.status) lines.push(`状態 ${row.status}`);
+  if (row.start) lines.push(t('tip_plan', { start: row.start, end: row.end || '-' }));
+  if (row.actual_start) {
+    lines.push(t('tip_actual', {
+      start: row.actual_start, end: row.actual_end || t('tip_running'),
+    }));
+  }
+  if (row.progress != null) {
+    lines.push(t('tip_progress', { value: Math.round(row.progress * 100) }));
+  }
+  if (row.member) lines.push(t('tip_member', { value: row.member }));
+  if (row.status) lines.push(t('tip_status', { value: row.status }));
   node.textContent = lines.join('\n');
   return node;
 }
@@ -422,14 +584,15 @@ function shade(hex, factor) {
 function renderTotals(totals) {
   const box = $('#totals');
   if (!totals) { box.hidden = true; box.replaceChildren(); return; }
+  const names = t('totals');
   const items = [
-    ['行数', `${totals.rows}`],
-    ['完了', `${totals.done}`],
-    ['進行中', `${totals.running}`],
-    ['遅延', `${totals.delayed}`, totals.delayed > 0],
-    ['全体進捗', `${Math.round(totals.progress * 100)}%`],
-    ['工数', `${totals.effort} 人日`],
-    ['期間', `${totals.first_day ?? '-'} 〜 ${totals.last_day ?? '-'}`],
+    [names.rows, `${totals.rows}`],
+    [names.done, `${totals.done}`],
+    [names.running, `${totals.running}`],
+    [names.delayed, `${totals.delayed}`, totals.delayed > 0],
+    [names.progress, `${Math.round(totals.progress * 100)}%`],
+    [names.effort, `${totals.effort} ${t('unit_effort')}`],
+    [names.period, `${totals.first_day ?? '-'} - ${totals.last_day ?? '-'}`],
   ];
   box.replaceChildren(...items.map(([term, value, warn]) => el('div', {},
     el('dt', { text: term }),
@@ -441,9 +604,10 @@ function renderTotals(totals) {
 async function importFile(file, unit = null) {
   const body = new FormData();
   body.append('file', file);
-  const query = unit ? `?unit=${encodeURIComponent(unit)}` : '';
+  const query = unit ? `&unit=${encodeURIComponent(unit)}` : '';
   try {
-    const response = await api(`/api/import${query}`, { method: 'POST', body });
+    const response = await api(`/api/import?lang=${language}${query}`,
+                               { method: 'POST', body });
     const model = await response.json();
     loadedFile = file;
     setMode('chart');
@@ -456,12 +620,14 @@ async function importFile(file, unit = null) {
       nowX: model.now_x,
       totals: model.totals,
       warnings: model.warnings,
-      info: `${model.timeline.start} 〜 ${model.timeline.end}`
-            + ` / ${model.timeline.columns.length} 列 / ${model.rows.length} 行`,
+      info: t('info_chart', {
+        start: model.timeline.start, end: model.timeline.end,
+        columns: model.timeline.columns.length, rows: model.rows.length,
+      }),
     });
-    if (!unit) banner(`${file.name} を読み込みました。`, true);
+    if (!unit) banner(t('imported', { name: file.name }), true);
   } catch (error) {
-    banner(`読み込めません: ${error.message}`);
+    banner(t('cannot_import', { reason: error.message }));
   }
 }
 
@@ -479,27 +645,85 @@ function setMode(next) {
   $('#btn-back').hidden = !chart;
   $('#btn-export').hidden = !chart;
   $('#btn-build').hidden = chart;
-  $('#preview-title').textContent = chart ? 'ガントチャート' : 'プレビュー';
-  $('#preview-hint').textContent = chart
-    ? '記入済みの Excel を読み込んで表示しています'
-    : '実際の Excel と同じ列・同じ見出しです';
-  $('#tagline').textContent = chart
-    ? '記入済みの WBS をガントチャートで表示しています。'
-    : '期間を指定すると、日程表と記入用の空行だけの Excel を書き出します。';
+  $('#preview-title').textContent = t(chart ? 'chart' : 'preview');
+  $('#preview-hint').textContent = t(chart ? 'hint_chart' : 'hint_blank');
+  $('#tagline').textContent = t(chart ? 'tagline_chart' : 'tagline_blank');
+}
+
+// ---------------------------------------------------------------- 言語
+/** 保存してある言語を読む。読めない環境 (プライベートウィンドウ等) は既定。 */
+function storedLanguage() {
+  try {
+    const saved = localStorage.getItem(LANGUAGE_KEY);
+    if (saved && UI[saved]) return saved;
+  } catch (_) { /* 保存領域が使えない */ }
+  return DEFAULT_LANGUAGE;
+}
+
+function rememberLanguage(value) {
+  try {
+    localStorage.setItem(LANGUAGE_KEY, value);
+  } catch (_) { /* 保存できなくても動作に影響はない */ }
+}
+
+/** ``data-i18n`` の付いた要素に、現在の言語の文言を入れる。 */
+function applyLanguage() {
+  document.documentElement.lang = language;
+  document.title = t('app_title');
+  for (const node of document.querySelectorAll('[data-i18n]')) {
+    node.textContent = t(node.dataset.i18n);
+  }
+  $('#members').placeholder = t('members_placeholder');
+  $('#preview-title').textContent = t(mode === 'chart' ? 'chart' : 'preview');
+  $('#preview-hint').textContent = t(mode === 'chart' ? 'hint_chart' : 'hint_blank');
+  $('#tagline').textContent = t(mode === 'chart' ? 'tagline_chart' : 'tagline_blank');
+}
+
+/** 言語を切り替え、選択肢と表示を作り直す。 */
+async function switchLanguage(value) {
+  language = UI[value] ? value : DEFAULT_LANGUAGE;
+  rememberLanguage(language);
+  applyLanguage();
+  try {
+    meta = await (await api(`/api/meta?lang=${language}`)).json();
+  } catch (error) {
+    banner(t('cannot_start', { reason: error.message }));
+    return;
+  }
+  fillChoices();
+  // 提案のままなら新しい言語の提案に差し替える (書き換えてあれば触らない)
+  if ($('#title').value === suggestedTitle) $('#title').value = meta.suggested.title;
+  suggestedTitle = meta.suggested.title;
+  $('#title').placeholder = suggestedTitle;
+
+  if (mode === 'chart' && loadedFile) await importFile(loadedFile, $('#chart-unit').value);
+  else await refresh();
+}
+
+/** 言語で変わる選択肢 (表示単位・曜日) を入れ直す。 */
+function fillChoices() {
+  const unit = $('#unit').value || 'week';
+  const chartUnit = $('#chart-unit').value || 'week';
+  const options = () => meta.units.map(
+    (u) => el('option', { value: u.value, text: u.label }));
+  $('#unit').replaceChildren(...options());
+  $('#unit').value = unit;
+  $('#chart-unit').replaceChildren(...options());
+  $('#chart-unit').value = chartUnit;
+  renderWeekdays();
 }
 
 // ---------------------------------------------------------------- 入力
 function buildForm() {
-  $('#unit').replaceChildren(...meta.units.map(
-    (u) => el('option', { value: u.value, text: u.label })));
   $('#unit').value = 'week';
+  $('#chart-unit').value = 'week';
   $('#rows').value = meta.default_rows;
   $('#rows').max = meta.max_rows;
   $('#start').value = meta.suggested.start;
   $('#end').value = meta.suggested.end;
-  $('#title').value = meta.suggested.title;
-  $('#title').placeholder = meta.suggested.title;
-  renderWeekdays();
+  suggestedTitle = meta.suggested.title;
+  $('#title').value = suggestedTitle;
+  $('#title').placeholder = suggestedTitle;
 }
 
 function renderWeekdays() {
@@ -531,6 +755,8 @@ function bind() {
       refresh();
     });
   }
+  $('#language').addEventListener('change',
+                                  (event) => switchLanguage(event.target.value));
   $('#spec-form').addEventListener('submit', (event) => event.preventDefault());
   $('#btn-build').addEventListener('click', download);
   $('#btn-export').addEventListener('click', exportChart);
@@ -552,7 +778,7 @@ function bind() {
 
 /** 空の WBS を書き出す。 */
 function download() {
-  return save($('#btn-build'), '/api/build', {
+  return save($('#btn-build'), `/api/build?lang=${language}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(currentSpec()),
@@ -565,7 +791,8 @@ function exportChart() {
   const body = new FormData();
   body.append('file', loadedFile);
   const unit = $('#chart-unit').value;
-  return save($('#btn-export'), `/api/export?unit=${encodeURIComponent(unit)}`,
+  return save($('#btn-export'),
+              `/api/export?lang=${language}&unit=${encodeURIComponent(unit)}`,
               { method: 'POST', body });
 }
 
@@ -583,9 +810,9 @@ async function save(button, path, options) {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    banner(`${name} を書き出しました。`, true);
+    banner(t('saved', { name }), true);
   } catch (error) {
-    banner(`書き出せません: ${error.message}`);
+    banner(t('cannot_save', { reason: error.message }));
   } finally {
     button.disabled = false;
   }
@@ -593,12 +820,18 @@ async function save(button, path, options) {
 
 async function start() {
   bind();
+  language = storedLanguage();
+  applyLanguage();
   try {
-    meta = await (await api('/api/meta')).json();
+    meta = await (await api(`/api/meta?lang=${language}`)).json();
   } catch (error) {
-    banner(`起動できません: ${error.message}`);
+    banner(t('cannot_start', { reason: error.message }));
     return;
   }
+  $('#language').replaceChildren(...meta.languages.map(
+    (l) => el('option', { value: l.value, text: l.label })));
+  $('#language').value = language;
+  fillChoices();
   buildForm();
   await refresh();
 }

@@ -25,6 +25,7 @@ import datetime as _dt
 from dataclasses import dataclass
 from typing import List
 
+from .i18n import DEFAULT_LANGUAGE, labels as get_labels
 from .workcal import WorkCalendar
 
 #: 表示単位
@@ -33,14 +34,7 @@ UNIT_WEEK = "week"
 UNIT_MONTH = "month"
 VALID_UNITS = (UNIT_DAY, UNIT_WEEK, UNIT_MONTH)
 
-WEEKDAY_JP = ("月", "火", "水", "木", "金", "土", "日")
 
-#: 単位ごとの (上段の数値書式, 下段の数値書式)
-HEADER_FORMATS = {
-    UNIT_DAY: ('m"月"', "d"),
-    UNIT_WEEK: ('m"月"', "m/d"),
-    UNIT_MONTH: ('yyyy"年"', 'm"月"'),
-}
 
 
 @dataclass
@@ -59,9 +53,11 @@ class Column:
 class Timeline:
     """チャートの横軸。"""
 
-    def __init__(self, start: _dt.date, period_days: int, unit: str, calendar: WorkCalendar):
+    def __init__(self, start: _dt.date, period_days: int, unit: str,
+                 calendar: WorkCalendar, language: str = DEFAULT_LANGUAGE):
         self.unit = unit
         self.calendar = calendar
+        self.labels = get_labels(language)
         self.start = start
         self.end = start + _dt.timedelta(days=max(period_days, 1) - 1)
         self.columns: List[Column] = self._build()
@@ -132,7 +128,7 @@ class Timeline:
     @property
     def formats(self):
         """(上段の数値書式, 下段の数値書式)。"""
-        return HEADER_FORMATS[self.unit]
+        return self.labels.header_formats[self.unit]
 
     def _group_key(self, col: Column):
         """上段の区切り。日/週は月ごと、月表示は年ごと。"""
@@ -162,7 +158,10 @@ class Timeline:
 
     def _top_entry(self, first: int, span: int):
         day = self.columns[first].start
-        text = f"{day.year}年" if self.unit == UNIT_MONTH else f"{day.month}月"
+        if self.unit == UNIT_MONTH:
+            text = self.labels.year_format.format(year=day.year)
+        else:
+            text = self.labels.month_names[day.month - 1]
         return (first, span, day, text)
 
     def header_bottom(self):
@@ -178,13 +177,13 @@ class Timeline:
             return str(col.start.day)
         if self.unit == UNIT_WEEK:
             return f"{col.start.month}/{col.start.day}"
-        return f"{col.start.month}月"
+        return self.labels.month_names[col.start.month - 1]
 
     def weekday_label(self, col: Column) -> str:
         """日単位表示のときの曜日ラベル。"""
         if self.unit != UNIT_DAY:
             return ""
-        return WEEKDAY_JP[col.start.weekday()]
+        return self.labels.weekdays[col.start.weekday()]
 
     def is_rest_column(self, col: Column) -> bool:
         """列全体が非稼働日か (日単位のみ意味を持つ)。"""

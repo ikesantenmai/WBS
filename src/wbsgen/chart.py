@@ -11,16 +11,17 @@ import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from . import style
+from .i18n import status_kind
 from .importer import ImportedWBS, Row
 from .timeline import Timeline
 
-#: 状態表示の色 (添付ファイルから抽出した配色)
+#: 画面での状態表示の色 (添付ファイルの配色を、画面で読みやすいように調整)
 STATUS_COLORS = {
-    "完了": ("C0C0C0", "666666"),
-    "実行中": ("FFFF99", "B36B00"),
-    "残り": ("FFCC00", "800000"),
-    "遅れ": ("FF99CC", "D00000"),
-    "あと": ("CCFFFF", "3D8BC4"),
+    "done": ("C0C0C0", "666666"),
+    "running": ("FFFF99", "B36B00"),
+    "remaining": ("FFCC00", "800000"),
+    "delayed": ("FF99CC", "D00000"),
+    "upcoming": ("CCFFFF", "3D8BC4"),
 }
 
 
@@ -28,13 +29,14 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
     """描画モデルを組み立てる。"""
     spec = imported.spec
     calendar = spec.calendar()
-    timeline = Timeline(spec.start, spec.period_days, spec.unit, calendar)
+    timeline = Timeline(spec.start, spec.period_days, spec.unit, calendar, spec.language)
     today = base_date or _dt.date.today()
     colors = _member_colors(imported)
 
     rows = [_row(row, timeline, calendar, colors) for row in imported.rows]
     return {
         "title": imported.title,
+        "language": spec.language,
         "warnings": imported.warnings,
         "base_date": today.isoformat(),
         "now_x": timeline.position(today) if timeline.overlaps(today, today) else None,
@@ -131,10 +133,12 @@ def _span(timeline: Timeline, start, end) -> Optional[Dict[str, float]]:
 
 
 def _status_color(status: str):
-    for key, value in STATUS_COLORS.items():
-        if status.startswith(key):
-            return "#" + value[0], "#" + value[1]
-    return None, None
+    """状態の色。書かれた言葉から種類を判定する (日英どちらでも効く)。"""
+    kind = status_kind(status)
+    if kind is None:
+        return None, None
+    background, foreground = STATUS_COLORS[kind]
+    return "#" + background, "#" + foreground
 
 
 def _totals(rows: List[Dict[str, Any]]) -> Dict[str, Any]:

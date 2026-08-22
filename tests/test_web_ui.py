@@ -260,3 +260,76 @@ def test_the_export_button_is_hidden_before_importing(page):
     assert page.is_hidden("#btn-export")
     assert page.is_visible("#btn-build")
     assert page.errors == []
+
+
+# ---------------------------------------------------------------- 言語
+def _set_language(page, value):
+    page.select_option("#language", value)
+    page.wait_for_function(f"() => document.documentElement.lang === '{value}'")
+    page.wait_for_selector("table.wbs tbody tr")
+
+
+def test_the_page_starts_in_japanese(page):
+    _reset(page)
+    _set_language(page, "ja")
+    assert page.text_content("h1") == "WBS ジェネレータ"
+    assert page.text_content("#btn-build") == "Excel をダウンロード"
+    headers = page.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(2) th", "n => n.map(x => x.textContent)")
+    assert headers[:4] == ["大項目", "中項目", "項番", "項目"]
+
+
+def test_switching_to_english_translates_the_page(page):
+    _reset(page)
+    _set_language(page, "en")
+    assert page.text_content("h1") == "WBS Generator"
+    assert page.text_content("#btn-build") == "Download Excel"
+    headers = page.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(2) th", "n => n.map(x => x.textContent)")
+    assert headers[:4] == ["Group", "Sub-group", "No.", "Task"]
+    assert _months(page)[:2] == ["Apr", "May"]
+    assert "columns" in page.text_content("#preview-info")
+    _set_language(page, "ja")
+    assert page.errors == []
+
+
+def test_the_suggested_title_follows_the_language(page):
+    _reset(page)
+    _set_language(page, "ja")
+    assert "スケジュール" in page.input_value("#title")
+    _set_language(page, "en")
+    assert page.input_value("#title").startswith("FY")
+
+    # 自分で書いた名前は言語を変えても残す
+    page.fill("#title", "My Project")
+    _set_language(page, "ja")
+    assert page.input_value("#title") == "My Project"
+    _set_language(page, "en")
+    assert page.input_value("#title") == "My Project"
+    assert page.errors == []
+
+
+def test_the_language_survives_a_reload(page, server):
+    _reset(page)
+    _set_language(page, "en")
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("table.wbs tbody tr")
+    assert page.input_value("#language") == "en"
+    assert page.text_content("h1") == "WBS Generator"
+    _set_language(page, "ja")
+    assert page.errors == []
+
+
+def test_downloading_in_english(page, tmp_path):
+    _reset(page)
+    _set_language(page, "en")
+    with page.expect_download() as download:
+        page.click("#btn-build")
+    saved = tmp_path / "en.xlsx"
+    download.value.save_as(saved)
+
+    import openpyxl
+
+    assert openpyxl.load_workbook(saved).sheetnames == ["Schedule", "Members", "Settings"]
+    _set_language(page, "ja")
+    assert page.errors == []

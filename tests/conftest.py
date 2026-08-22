@@ -39,7 +39,8 @@ def write_filled(path, rows=FILLED_ROWS, **spec_kwargs):
     workbook.write(spec, path)
 
     book = openpyxl.load_workbook(path)
-    sheet = book[workbook.SHEET_PLAN]
+    # シート名は言語で変わるので、仕様から引く
+    sheet = book[spec.labels.sheet_plan]
     # 日単位表示では見出しの下に曜日の行が入るぶん、記入欄が 1 行下がる
     first_row = 6 if spec.unit == "day" else 5
     for index, values in enumerate(rows):

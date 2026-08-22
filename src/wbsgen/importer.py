@@ -14,49 +14,79 @@ from typing import Any, Dict, List, Optional
 from openpyxl import load_workbook
 
 from .blank import MAX_ROWS, BlankWBS, SpecError
-from .timeline import UNIT_DAY, UNIT_MONTH, UNIT_WEEK, VALID_UNITS
-from .workbook import SHEET_CONFIG, SHEET_MEMBER, SHEET_PLAN
-from .workcal import WEEKDAY_JP
+from .i18n import DEFAULT_LANGUAGE, LABELS, message, normalize
+from .timeline import UNIT_DAY, UNIT_WEEK, VALID_UNITS
+from .workcal import WEEKDAY_KEYS
 
-#: 見出しの文字 -> 属性名。表の列はこれで探す。
-HEADERS = {
-    "大項目": "group",
-    "中項目": "subgroup",
-    "項番": "no",
-    "項目": "name",
-    "工数": "effort",
-    "先行": "predecessor",
-    "担当": "member",
-    "状態": "status",
-    "遅れ": "delay",
-    "進捗": "progress",
+def _build_header_maps():
+    """全言語の見出しから、``見出し -> 属性名`` の表を作る。
+
+    「開始」「日数」は予定と実績の両方にあるので、単独では決められない。
+    それらは :data:`AMBIGUOUS_HEADERS` に回す。
+    """
+    plain: Dict[str, str] = {}
+    ambiguous: Dict[str, tuple] = {}
+    grouped: Dict[tuple, str] = {}
+
+    for text in LABELS.values():
+        pairs = [
+            (text.group_plan, "start", text.columns["start"]),
+            (text.group_plan, "days", text.columns["days"]),
+            (text.group_plan, "end", text.columns["end"]),
+            (text.group_actual, "actual_start", text.columns["actual_start"]),
+            (text.group_actual, "actual_days", text.columns["actual_days"]),
+            (text.group_actual, "actual_end", text.columns["actual_end"]),
+        ]
+        for group, key, label in pairs:
+            grouped[(group, label)] = key
+
+        for plan_key, actual_key in (("start", "actual_start"),
+                                     ("days", "actual_days"),
+                                     ("end", "actual_end")):
+            for label in (text.columns[plan_key], text.columns[actual_key]):
+                ambiguous[label] = (plan_key, actual_key)
+
+        for key, label in text.columns.items():
+            if label not in ambiguous:
+                plain.setdefault(label, key)
+
+    return plain, ambiguous, grouped
+
+
+#: 見出しの文字 -> 属性名 (予定/実績で重ならない列)
+HEADERS, AMBIGUOUS_HEADERS, GROUPED_HEADERS = _build_header_maps()
+
+#: 「項目」の列を探すときに見る見出し (言語ごと)
+NAME_LABELS = {text.columns["name"] for text in LABELS.values()}
+
+#: 設定シートの表示単位の書き方 -> 内部の値
+UNIT_LABELS = {
+    label: unit
+    for text in LABELS.values()
+    for unit, label in text.units.items()
 }
 
-#: 予定と実績で同じ見出しが出る列。上の帯 (予定 / 実績) で見分けるが、
-#: 帯が読めないときは出てきた順に「予定 → 実績」とみなす。
-AMBIGUOUS_HEADERS = {
-    "開始日": ("start", "actual_start"),
-    "開始": ("start", "actual_start"),
-    "日数": ("days", "actual_days"),
-    "終了日": ("end", "actual_end"),
-    "終了": ("end", "actual_end"),
+#: 設定シートの見出し -> 意味 (言語ごとの書き方をまとめる)
+CONFIG_KEYS = {
+    "start": {text.config_start for text in LABELS.values()},
+    "period": {text.config_period for text in LABELS.values()},
+    "unit": {text.config_unit for text in LABELS.values()},
 }
 
-#: 上の帯と組にした見出し
-GROUPED_HEADERS = {
-    ("予定", "開始日"): "start",
-    ("予定", "開始"): "start",
-    ("予定", "日数"): "days",
-    ("予定", "終了日"): "end",
-    ("予定", "終了"): "end",
-    ("実績", "開始日"): "actual_start",
-    ("実績", "開始"): "actual_start",
-    ("実績", "日数"): "actual_days",
-    ("実績", "終了日"): "actual_end",
-    ("実績", "終了"): "actual_end",
+#: 稼働日の行 (曜日名 -> weekday 番号) と「出」の書き方
+WEEKDAY_LABELS = {
+    name: index
+    for text in LABELS.values()
+    for index, name in enumerate(text.weekday_names)
 }
+WORK_ON_LABELS = {text.work_on for text in LABELS.values()}
 
-UNIT_LABELS = {"日単位": UNIT_DAY, "週単位": UNIT_WEEK, "月単位": UNIT_MONTH}
+#: シート名の候補 (言語ごと)
+PLAN_SHEETS = {text.sheet_plan for text in LABELS.values()}
+CONFIG_SHEETS = {text.sheet_config for text in LABELS.values()}
+MEMBER_SHEETS = {text.sheet_member for text in LABELS.values()}
+MEMBER_SKIP = ({text.member_title for text in LABELS.values()}
+               | {text.member_headers[0] for text in LABELS.values()})
 
 #: 見出しを探す範囲
 HEADER_SEARCH_ROWS = 20
@@ -106,33 +136,43 @@ class ImportedWBS:
 
 
 # ----------------------------------------------------------------------
-def read(source, filename: str = "") -> ImportedWBS:
-    """``.xlsx`` を読み込む。``source`` はパスかファイルオブジェクト。"""
+def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE) -> ImportedWBS:
+    """``.xlsx`` を読み込む。``source`` はパスかファイルオブジェクト。
+
+    日本語版・英語版のどちらのファイルも読める。``language`` は
+    メッセージと、読み込んだあとの表示に使う言語。
+    """
+    lang = normalize(language)
     try:
         book = load_workbook(source, data_only=True, read_only=False)
     except Exception as exc:  # noqa: BLE001 - openpyxl の例外は多岐にわたる
-        raise SpecError(f"Excel として読めません: {exc}")
+        raise SpecError(message(lang, "not_excel", reason=exc))
 
-    sheet = book[SHEET_PLAN] if SHEET_PLAN in book.sheetnames else book.worksheets[0]
-    header_row, columns = _find_headers(sheet)
+    sheet = _pick_sheet(book, PLAN_SHEETS)
+    header_row, columns = _find_headers(sheet, lang)
     if "name" not in columns:
-        raise SpecError(
-            "「項目」の列が見つかりません。"
-            "このツールが作った WBS を記入したファイルを指定してください。"
-        )
+        raise SpecError(message(lang, "no_task_column"))
 
     config = _read_config(book)
     first_row = header_row + (2 if config.get("unit") == UNIT_DAY else 1)
-    rows, warnings = _read_rows(sheet, first_row, columns)
+    rows, warnings = _read_rows(sheet, first_row, columns, lang)
 
-    spec = _build_spec(config, rows, book, filename)
+    spec = _build_spec(config, rows, book, filename, lang)
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings)
 
 
+def _pick_sheet(book, names):
+    """言語ごとのシート名を順に探し、無ければ先頭のシートを使う。"""
+    for name in book.sheetnames:
+        if name in names:
+            return book[name]
+    return book.worksheets[0]
+
+
 # ----------------------------------------------------------------------
-def _find_headers(sheet) -> "tuple[int, Dict[str, int]]":
+def _find_headers(sheet, language: str) -> "tuple[int, Dict[str, int]]":
     """見出し行を探し、``属性名 -> 列番号`` を返す。"""
     max_row = min(sheet.max_row or 1, HEADER_SEARCH_ROWS)
     max_col = min(sheet.max_column or 1, HEADER_SEARCH_COLS)
@@ -142,10 +182,10 @@ def _find_headers(sheet) -> "tuple[int, Dict[str, int]]":
             value = sheet.cell(row=row, column=col).value
             if isinstance(value, str) and value.strip():
                 labels[col] = value.strip()
-        if "項目" not in labels.values():
+        if not NAME_LABELS & set(labels.values()):
             continue
         return row, _map_columns(sheet, row, labels)
-    raise SpecError("見出し行が見つかりません (「項目」の列が必要です)。")
+    raise SpecError(message(language, "no_header"))
 
 
 def _map_columns(sheet, header_row: int, labels: Dict[int, str]) -> Dict[str, int]:
@@ -207,7 +247,7 @@ def _read_title(sheet, header_row: int) -> str:
 
 
 # ----------------------------------------------------------------------
-def _read_rows(sheet, first_row: int, columns: Dict[str, int]):
+def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
     """記入された行を読む。空行は飛ばす。"""
     rows: List[Row] = []
     warnings: List[str] = []
@@ -241,14 +281,15 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int]):
             row.progress = _ratio(raw.get("progress"))
             row.effort = _number(raw.get("effort"))
         except ValueError as exc:
-            warnings.append(f"{index} 行目: {exc}")
+            warnings.append(message(language, "row_prefix", row=index,
+                                    reason=_reason(exc, language)))
             continue
 
         if not row.name and not row.has_plan:
             continue
         rows.append(row)
         if len(rows) > MAX_ROWS:
-            warnings.append(f"{MAX_ROWS} 行を超えたので、以降は読み飛ばしました。")
+            warnings.append(message(language, "too_many_rows", maximum=MAX_ROWS))
             break
 
     return rows, warnings
@@ -257,9 +298,9 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int]):
 # ----------------------------------------------------------------------
 def _read_config(book) -> Dict[str, Any]:
     """設定シートから表示期間と稼働日を読む。無ければ空。"""
-    if SHEET_CONFIG not in book.sheetnames:
+    sheet = next((book[name] for name in book.sheetnames if name in CONFIG_SHEETS), None)
+    if sheet is None:
         return {}
-    sheet = book[SHEET_CONFIG]
     pairs: Dict[str, Any] = {}
     for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row or 1, 40),
                               max_col=3, values_only=True):
@@ -268,25 +309,31 @@ def _read_config(book) -> Dict[str, Any]:
         if isinstance(label, str) and label.strip():
             pairs[label.strip()] = value
 
+    def first(kind):
+        for label in CONFIG_KEYS[kind]:
+            if label in pairs:
+                return pairs[label]
+        return None
+
     config: Dict[str, Any] = {}
-    start = _date_or_none(pairs.get("チャート表示開始日"))
+    start = _date_or_none(first("start"))
     if start:
         config["start"] = start
-    period = pairs.get("チャート表示期間(日)")
+    period = first("period")
     if isinstance(period, (int, float)):
         config["period_days"] = int(period)
-    unit = pairs.get("チャート表示単位")
+    unit = first("unit")
     if isinstance(unit, str) and unit.strip() in UNIT_LABELS:
         config["unit"] = UNIT_LABELS[unit.strip()]
 
-    workdays = [
-        key for key, name in zip(
-            ("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
-            ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"))
-        if str(pairs.get(name, "")).strip() == "出"
-    ]
-    if workdays:
-        config["workdays"] = workdays
+    # 稼働曜日 (曜日名は言語ごとに違うので、まとめた表で引く)
+    working = set()
+    for label, value in pairs.items():
+        index = WEEKDAY_LABELS.get(label)
+        if index is not None and str(value).strip() in WORK_ON_LABELS:
+            working.add(index)
+    if working:
+        config["workdays"] = [WEEKDAY_KEYS[i] for i in sorted(working)]
 
     holidays = []
     for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row or 1, 400),
@@ -299,19 +346,19 @@ def _read_config(book) -> Dict[str, Any]:
 
 
 def _read_members(book) -> List[str]:
-    if SHEET_MEMBER not in book.sheetnames:
+    sheet = next((book[name] for name in book.sheetnames if name in MEMBER_SHEETS), None)
+    if sheet is None:
         return []
-    sheet = book[SHEET_MEMBER]
     names = []
     for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row or 1, 200),
-                              min_col=2, max_col=2, values_only=True):
+                               min_col=2, max_col=2, values_only=True):
         value = _text(row[0])
-        if value and value not in ("担当", "◆担当者一覧"):
+        if value and value not in MEMBER_SKIP:
             names.append(value)
     return names
 
 
-def _build_spec(config, rows: List[Row], book, filename: str) -> BlankWBS:
+def _build_spec(config, rows: List[Row], book, filename: str, language: str) -> BlankWBS:
     """表示に使う期間を決める。設定シートが無ければ記入内容から割り出す。"""
     days = [d for row in rows
             for d in (row.start, row.end, row.actual_start, row.actual_end) if d]
@@ -325,7 +372,7 @@ def _build_spec(config, rows: List[Row], book, filename: str) -> BlankWBS:
         last = max(days) if days else start
         period = max((last - start).days + 14, 30)
 
-    title = Path(filename).stem if filename else "読み込んだ WBS"
+    title = Path(filename).stem if filename else message(language, "imported_title")
     spec = BlankWBS(
         title=title,
         start=start,
@@ -337,6 +384,7 @@ def _build_spec(config, rows: List[Row], book, filename: str) -> BlankWBS:
         # 休日は設定シートの一覧をそのまま使う。無ければ祝日を補う。
         japanese_holidays=not config.get("holidays"),
         holidays=config.get("holidays") or [],
+        language=language,
     )
     if spec.unit not in VALID_UNITS:
         spec.unit = UNIT_WEEK
@@ -346,6 +394,26 @@ def _build_spec(config, rows: List[Row], book, filename: str) -> BlankWBS:
 # ----------------------------------------------------------------------
 # セルの値の変換
 # ----------------------------------------------------------------------
+class _CellError(str):
+    """セルを読めなかったときの理由。文言は行を組み立てるときに解決する。
+
+    ``str`` を継承しているので、そのまま例外に載せても壊れない。
+    """
+
+    def __new__(cls, key: str, value):
+        self = super().__new__(cls, f"{key}:{value!r}")
+        self.key = key
+        self.value = value
+        return self
+
+def _reason(exc: Exception, language: str) -> str:
+    """例外から、その言語での理由を組み立てる。"""
+    detail = exc.args[0] if exc.args else ""
+    if isinstance(detail, _CellError):
+        return message(language, detail.key, value=detail.value)
+    return str(detail)
+
+
 def _text(value) -> str:
     if value is None:
         return ""
@@ -357,7 +425,7 @@ def _text(value) -> str:
 def _date(value) -> Optional[_dt.date]:
     day = _date_or_none(value)
     if day is None and value not in (None, ""):
-        raise ValueError(f"日付として読めません: {value!r}")
+        raise ValueError(_CellError("cell_bad_date", value))
     return day
 
 
@@ -390,7 +458,7 @@ def _int(value) -> Optional[int]:
     try:
         return int(float(text))
     except ValueError:
-        raise ValueError(f"日数として読めません: {value!r}")
+        raise ValueError(_CellError("cell_bad_days", value))
 
 
 def _number(value) -> Optional[float]:
@@ -401,7 +469,7 @@ def _number(value) -> Optional[float]:
     try:
         return float(str(value).strip())
     except ValueError:
-        raise ValueError(f"数値として読めません: {value!r}")
+        raise ValueError(_CellError("cell_bad_number", value))
 
 
 def _ratio(value) -> Optional[float]:
@@ -415,7 +483,7 @@ def _ratio(value) -> Optional[float]:
         try:
             number = float(text.rstrip("%")) / (100.0 if text.endswith("%") else 1.0)
         except ValueError:
-            raise ValueError(f"進捗として読めません: {value!r}")
+            raise ValueError(_CellError("cell_bad_progress", value))
     if number > 1.0:
         number /= 100.0
     return min(max(number, 0.0), 1.0)

@@ -133,3 +133,58 @@ def test_serve_needs_no_arguments_on_a_paas(monkeypatch):
     monkeypatch.setattr("wbsgen.web.serve", lambda **kw: called.update(kw))
     assert cli.main(["serve"]) == 0
     assert called == {"host": "0.0.0.0", "port": 10000, "reload": False}
+
+
+# ---------------------------------------------------------------- 言語
+def test_output_is_japanese_by_default(tmp_path, capsys):
+    main(["new", "--start", "2026-04-01", "--months", "3",
+          "-o", str(tmp_path / "a.xlsx")])
+    out = capsys.readouterr().out
+    assert "生成しました" in out
+    assert "記入用の空行" in out
+
+
+def test_output_can_be_english(tmp_path, capsys):
+    main(["new", "--start", "2026-04-01", "--months", "3", "--lang", "en",
+          "-o", str(tmp_path / "a.xlsx")])
+    out = capsys.readouterr().out
+    assert "Created:" in out
+    assert "Blank rows:" in out
+
+
+@pytest.mark.parametrize("args,sheets", [
+    ([], ["スケジュール", "担当者一覧", "設定"]),
+    (["--lang", "en"], ["Schedule", "Members", "Settings"]),
+])
+def test_the_workbook_follows_the_language(tmp_path, args, sheets):
+    output = tmp_path / "l.xlsx"
+    assert main(["new", "--start", "2026-04-01", "--months", "3", *args,
+                 "-o", str(output)]) == 0
+    assert openpyxl.load_workbook(output).sheetnames == sheets
+
+
+@pytest.mark.parametrize("args,fragment", [
+    ([], "エラー"),
+    (["--lang", "en"], "Error"),
+])
+def test_errors_follow_the_language(tmp_path, capsys, args, fragment):
+    assert main(["new", "--start", "2026-04-01", "--end", "2020-01-01", *args,
+                 "-o", str(tmp_path / "x.xlsx")]) == 2
+    assert fragment in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("args,fragment", [
+    ([], "空の WBS を作る"),
+    (["--lang", "en"], "create an empty WBS"),
+])
+def test_help_follows_the_language(capsys, args, fragment):
+    with pytest.raises(SystemExit):
+        main([*args, "--help"])
+    assert fragment in capsys.readouterr().out
+
+
+def test_the_language_option_is_read_before_the_parser(capsys):
+    """--lang はヘルプの文言そのものを決めるので、パーサより先に見る。"""
+    with pytest.raises(SystemExit):
+        main(["--lang=en", "new", "--help"])
+    assert "output path" in capsys.readouterr().out
