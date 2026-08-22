@@ -132,6 +132,11 @@ class Row:
         return self.actual_start is not None
 
     @property
+    def has_actual_record(self) -> bool:
+        """実績の日付が 1 つでも入っているか。"""
+        return self.actual_start is not None or self.actual_end is not None
+
+    @property
     def is_finished(self) -> bool:
         """実績の終了日が**書かれている**か (完了の判定に使う)。
 
@@ -538,7 +543,9 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
         # 導出をやり直せるよう、書かれていた値を控える
         row.written = {key: getattr(row, key) for key in WRITTEN_FIELDS}
 
-        if not row.name and not row.has_plan:
+        # 項目名も予定も無い行でも、実績が入っていれば残す
+        # (実績の終了日だけを記録してある行を落とさないため)
+        if not row.name and not row.has_plan and not row.has_actual_record:
             continue
         rows.append(row)
         if len(rows) > MAX_ROWS:
@@ -719,12 +726,25 @@ def _date(value) -> Optional[_dt.date]:
     return day
 
 
+#: Excel の日付の起点 (1900 年のうるう年の扱いを合わせるため 12/30)
+EXCEL_EPOCH = _dt.date(1899, 12, 30)
+#: 日付として受け付けるシリアル値の範囲 (1901-01-01 〜 2199-12-31)
+SERIAL_RANGE = ((_dt.date(1901, 1, 1) - EXCEL_EPOCH).days,
+                (_dt.date(2199, 12, 31) - EXCEL_EPOCH).days)
+
+
 def _date_or_none(value) -> Optional[_dt.date]:
     if isinstance(value, _dt.datetime):
         return value.date()
     if isinstance(value, _dt.date):
         return value
     if _is_blank(value):
+        return None
+    # 書式が「標準」のままだと、日付は数値 (シリアル値) として入っている
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        low, high = SERIAL_RANGE
+        if low <= value <= high:
+            return EXCEL_EPOCH + _dt.timedelta(days=int(value))
         return None
     text = _clean(value).replace("/", "-").replace(".", "-")
     for fmt in DATE_FORMATS:

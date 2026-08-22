@@ -176,6 +176,7 @@ Because these sheets are filled in by hand, the following are also accepted.
 - Marks that mean "nothing here" (`-` `—` `未` `なし` `N/A` …) count as empty
 - Full-width digits and signs (`８０％`, `２０２６/４/１０`) are folded to ASCII
 - Dates as `2026-04-10`, `2026/4/10`, `2026.4.10`, `2026年4月10日`, `4/10`
+- A date left as a plain number (an Excel serial) is read as a date
 - Days as `10`, `10日`, `10 days`, `10d`
 - Progress as `0.8`, `80%`, `80`
 
@@ -217,7 +218,7 @@ actual.
 | Actual start and end | **Actual days are counted again from those two** |
 | Actual start and days only | An end date is derived from the actual days (so the bar can be drawn) |
 | No actual start | **Actual days are left empty** |
-| An actual end date | **Progress becomes 100%**; this wins over a written value |
+| An actual end date | **Progress becomes 100% and the status becomes Done**; this wins over written values |
 | Planned dates | **The status and delay are calculated** (see below) |
 
 Only a row with no end date works the other way round: the end date is
@@ -225,10 +226,20 @@ derived from the days that were written, so the bar can be drawn. Counting
 back from that derived end gives the same number, so the days stay as they
 were.
 
+**A row with an actual end date written in is always 100% and Done.** That
+holds even if it finished after the planned end, even with no planned dates at
+all, and whatever progress or status the file says. A row with an empty name is
+kept too, as long as it has actual dates.
+
 Only an actual end date that is *written in* counts as finished. An end date
 **derived** from the actual days does not (otherwise a task in progress would
 silently become complete). For the same reason, a derived actual end date is
 not written back into the cell when exporting.
+
+If a row with an end date does not become Done, that cell is being **read as
+empty**. The reason is listed in the warnings shown when the file is read (no
+stored formula result, a heading that does not match, or contents that cannot
+be read as a date).
 
 #### Status
 

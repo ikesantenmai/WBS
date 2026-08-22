@@ -385,6 +385,72 @@ def test_the_working_calendar_is_used_for_counting(make_filled):
     assert read(make_filled("w2.xlsx", rows=rows, workdays=weekdays)).rows[0].days == 12
 
 
+# ------------------------------------------------- 実績の終了日は必ず完了にする
+def _write_plain_number(path, cell, value):
+    """書式を「標準」にしたうえで数値を入れる (日付書式が付いていない状態)。"""
+    book = openpyxl.load_workbook(path)
+    target = book[SHEET_PLAN][cell]
+    target.value = value
+    target.number_format = "General"
+    book.save(path)
+
+
+def test_a_date_serial_number_is_read_as_a_date(make_filled):
+    """書式が「標準」のままの日付 (シリアル値) も日付として読む。
+
+    そのままだと数値として読めず空になり、完了にならない。
+    """
+    path = make_filled("serial.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), None, None, 0.3, None, "", "設計", "実行中"),
+    ])
+    _write_plain_number(path, "K5", 46173)   # 2026-05-31 のシリアル値
+
+    imported = read(path, base_date=BASE)
+    row = imported.rows[0]
+    assert row.actual_end == dt.date(2026, 5, 31)
+    assert row.progress == 1.0
+    assert row.status == "完了"
+    assert imported.warnings == []
+
+
+def test_a_number_that_is_not_a_date_is_still_reported(make_filled):
+    path = make_filled("serial2.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), None, None, 0.3, None, "", "設計", ""),
+    ])
+    _write_plain_number(path, "K5", 5)       # 日付にしては小さすぎる
+
+    imported = read(path, base_date=BASE)
+    assert imported.rows[0].actual_end is None
+    assert any("5 行目" in w for w in imported.warnings), imported.warnings
+
+
+def test_a_row_with_only_an_actual_end_date_is_kept(make_filled):
+    """項目名も予定も無くても、実績が入っていれば行を残して完了にする。"""
+    path = make_filled("only-actual.xlsx", rows=[
+        ("開発", "", "", "", None, None, None,
+         None, None, dt.date(2026, 5, 1), None, None, "", "設計", ""),
+    ])
+    rows = read(path, base_date=BASE).rows
+    assert len(rows) == 1
+    assert rows[0].progress == 1.0
+    assert rows[0].status == "完了"
+
+
+def test_a_late_finish_is_still_done(make_filled):
+    """予定の終了日より後に終わった行も完了とする。"""
+    path = make_filled("late.xlsx", rows=[
+        ("開発", "", "1", "遅れて完了", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), dt.date(2026, 4, 1), None, dt.date(2026, 9, 30),
+         0.1, None, "", "設計", "遅れ 30 日"),
+    ])
+    row = read(path, base_date=BASE).rows[0]
+    assert row.progress == 1.0
+    assert row.status == "完了"
+    assert row.delay is None
+
+
 # ---------------------------------------------------------------- 状態
 BASE = dt.date(2026, 6, 10)
 
