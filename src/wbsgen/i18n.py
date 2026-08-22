@@ -216,7 +216,7 @@ MESSAGES = {
         "cell_bad_days": "日数として読めません: {value!r}",
         "cell_bad_number": "数値として読めません: {value!r}",
         "cell_bad_progress": "進捗として読めません: {value!r}",
-        "row_prefix": "{row} 行目: {reason}",
+        "cell_prefix": "{row} 行目「{column}」: {reason}",
         "too_many_rows": "{maximum} 行を超えたので、以降は読み飛ばしました。",
         "imported_title": "読み込んだ WBS",
 
@@ -249,7 +249,7 @@ MESSAGES = {
         "cell_bad_days": "Cannot read as a number of days: {value!r}",
         "cell_bad_number": "Cannot read as a number: {value!r}",
         "cell_bad_progress": "Cannot read as progress: {value!r}",
-        "row_prefix": "Row {row}: {reason}",
+        "cell_prefix": "Row {row}, \"{column}\": {reason}",
         "too_many_rows": "More than {maximum} rows; the rest were skipped.",
         "imported_title": "Imported WBS",
 

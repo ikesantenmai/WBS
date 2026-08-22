@@ -125,15 +125,105 @@ def test_days_written_with_a_unit_is_read(make_filled):
     assert read(path).rows[0].days == 5
 
 
-def test_unreadable_values_are_reported_not_fatal(make_filled):
+def test_an_unreadable_cell_does_not_drop_the_row(make_filled):
+    """1 か所の書き間違いで行がまるごと消えないこと。"""
     path = make_filled("bad.xlsx")
     book = openpyxl.load_workbook(path)
-    book[SHEET_PLAN]["F6"] = "来週くらい"
+    book[SHEET_PLAN]["F6"] = "来週くらい"       # 予定開始日
     book.save(path)
 
     imported = read(path)
-    assert len(imported.rows) == 4                 # 読めた行は残る
-    assert any("6 行目" in w for w in imported.warnings)
+    assert len(imported.rows) == 5              # 行は残る
+    broken = imported.rows[1]
+    assert broken.name == "基本設計"
+    assert broken.start is None                 # 読めなかった項目だけ空
+    assert broken.end == dt.date(2026, 5, 7)    # 他の項目は生きている
+    assert any("6 行目" in w and "開始日" in w for w in imported.warnings)
+
+
+# ---------------------------------------------------------------- 雑な記入
+@pytest.mark.parametrize("column,written", [
+    ("L", "-"), ("L", "ー"), ("L", "―"),        # 遅れに「無し」を表す記号
+    ("G", "-"), ("J", "-"),                     # 日数に記号
+    ("M", "-"),                                 # 進捗に記号
+    ("K", "未"), ("K", "未定"), ("K", "なし"),    # 実績終了日に「まだ」
+    ("K", "   "),                               # 空白だけ
+])
+def test_marks_that_mean_nothing_are_read_as_blank(make_filled, column, written):
+    """手書きの表でよく出る「無し」の書き方は、空として扱う。"""
+    path = make_filled("blank-mark.xlsx")
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN][f"{column}5"] = written
+    book.save(path)
+
+    imported = read(path)
+    assert len(imported.rows) == 5
+    assert imported.warnings == []
+
+
+@pytest.mark.parametrize("written,expected", [
+    ("８０％", 0.8), ("80%", 0.8), ("０．５", 0.5), ("100", 1.0),
+])
+def test_full_width_numbers_are_understood(make_filled, written, expected):
+    """日本語入力では全角の数字や％がよく混ざる。"""
+    path = make_filled("zenkaku.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 5, dt.date(2026, 4, 7),
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN]["M5"] = written
+    book.save(path)
+    assert read(path).rows[0].progress == expected
+
+
+@pytest.mark.parametrize("written,expected", [
+    ("2026-04-10", (2026, 4, 10)),
+    ("2026/4/10", (2026, 4, 10)),
+    ("2026.4.10", (2026, 4, 10)),
+    ("2026年4月10日", (2026, 4, 10)),
+    ("２０２６/４/１０", (2026, 4, 10)),
+])
+def test_dates_written_in_several_ways_are_understood(make_filled, written, expected):
+    path = make_filled("dates.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 5, dt.date(2026, 4, 7),
+         dt.date(2026, 4, 1), None, None, None, None, "", "設計", ""),
+    ])
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN]["K5"] = written               # 実績終了日
+    book.save(path)
+
+    row = read(path).rows[0]
+    assert row.actual_end == dt.date(*expected)
+    assert row.progress == 1.0                     # 終了日が読めれば 100%
+
+
+@pytest.mark.parametrize("written,expected", [
+    ("10 日", 10), ("10日", 10), ("１０日", 10), ("10 days", 10), ("10d", 10),
+])
+def test_days_with_a_unit_are_understood(make_filled, written, expected):
+    path = make_filled("units.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), None, None,
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN]["G5"] = written
+    book.save(path)
+    assert read(path).rows[0].days == expected
+
+
+def test_a_row_stays_finished_even_if_another_cell_is_unreadable(make_filled):
+    """進捗欄が読めなくても、実績終了日があれば 100% になる。"""
+    path = make_filled("mixed.xlsx", rows=[
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 5, dt.date(2026, 4, 7),
+         dt.date(2026, 4, 1), None, dt.date(2026, 4, 6), None, None, "", "設計", ""),
+    ])
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN]["M5"] = "済"                  # 進捗に文字を書いてしまった
+    book.save(path)
+
+    imported = read(path)
+    assert imported.rows[0].progress == 1.0
+    assert any("進捗" in w for w in imported.warnings)
 
 
 # ---------------------------------------------------------------- 異常系

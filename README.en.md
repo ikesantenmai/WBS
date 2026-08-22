@@ -169,8 +169,19 @@ and the Gantt chart side by side.
 
 Columns are found by their heading text, so files with extra or reordered
 columns still read. The period, working days and holidays come from the
-Settings sheet and the owners from the Members sheet. Rows that cannot be read
-are skipped and reported on screen.
+Settings sheet and the owners from the Members sheet.
+
+Because these sheets are filled in by hand, the following are also accepted.
+
+- Marks that mean "nothing here" (`-` `—` `未` `なし` `N/A` …) count as empty
+- Full-width digits and signs (`８０％`, `２０２６/４/１０`) are folded to ASCII
+- Dates as `2026-04-10`, `2026/4/10`, `2026.4.10`, `2026年4月10日`, `4/10`
+- Days as `10`, `10日`, `10 days`, `10d`
+- Progress as `0.8`, `80%`, `80`
+
+**A cell that cannot be read does not discard the row.** Only that field is
+left empty, and the row and column are reported on screen, so a single typo
+never makes a whole row disappear.
 
 #### How days and progress are decided
 

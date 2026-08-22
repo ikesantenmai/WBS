@@ -182,7 +182,7 @@ def test_import_rejects_an_empty_workbook(client, tmp_path):
     assert "記入された行が見つかりません" in response.json()["detail"]
 
 
-def test_import_reports_unreadable_rows(client, make_filled):
+def test_import_reports_unreadable_cells_without_dropping_rows(client, make_filled):
     import openpyxl
 
     path = make_filled("bad.xlsx")
@@ -191,8 +191,9 @@ def test_import_reports_unreadable_rows(client, make_filled):
     book.save(path)
 
     body = _upload(client, path, name="bad.xlsx").json()
-    assert len(body["rows"]) == 4
-    assert any("6 行目" in w for w in body["warnings"])
+    assert len(body["rows"]) == 5                  # 行は消えない
+    assert body["rows"][1]["start"] is None        # 読めなかった項目だけ空
+    assert any("6 行目" in w and "開始日" in w for w in body["warnings"])
 
 
 # ---------------------------------------------------------------- export

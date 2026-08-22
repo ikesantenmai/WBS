@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import unicodedata as _unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -14,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from openpyxl import load_workbook
 
 from .blank import MAX_ROWS, BlankWBS, SpecError
-from .i18n import DEFAULT_LANGUAGE, LABELS, message, normalize
+from .i18n import DEFAULT_LANGUAGE, LABELS, labels, message, normalize
 from .timeline import UNIT_DAY, UNIT_WEEK, VALID_UNITS
 from .workcal import WEEKDAY_KEYS
 
@@ -298,15 +299,20 @@ def _read_title(sheet, header_row: int) -> str:
 
 # ----------------------------------------------------------------------
 def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
-    """記入された行を読む。空行は飛ばす。"""
+    """記入された行を読む。空行は飛ばす。
+
+    読めないセルがあっても行は捨てず、その項目だけ空にして注意書きに残す
+    (1 か所の書き間違いで行がまるごと消えないようにするため)。
+    """
     rows: List[Row] = []
     warnings: List[str] = []
     group = subgroup = ""
+    text = labels(language)
 
     for index in range(first_row, (sheet.max_row or first_row) + 1):
         raw = {key: sheet.cell(row=index, column=col).value
                for key, col in columns.items()}
-        if all(v in (None, "") for v in raw.values()):
+        if all(_is_blank(v) for v in raw.values()):
             continue
 
         row = Row(row=index)
@@ -320,20 +326,26 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
         row.member = _text(raw.get("member"))
         row.status = _text(raw.get("status"))
 
-        try:
-            row.start = _date(raw.get("start"))
-            row.end = _date(raw.get("end"))
-            row.actual_start = _date(raw.get("actual_start"))
-            row.actual_end = _date(raw.get("actual_end"))
-            row.days = _int(raw.get("days"))
-            row.actual_days = _int(raw.get("actual_days"))
-            row.delay = _int(raw.get("delay"))
-            row.progress = _ratio(raw.get("progress"))
-            row.effort = _number(raw.get("effort"))
-        except ValueError as exc:
-            warnings.append(message(language, "row_prefix", row=index,
-                                    reason=_reason(exc, language)))
-            continue
+        def cell(key, convert):
+            """1 つのセルを読む。読めなければ空にして、どのセルかを控える。"""
+            try:
+                return convert(raw.get(key))
+            except ValueError as exc:
+                warnings.append(message(
+                    language, "cell_prefix", row=index,
+                    column=text.columns.get(key, key),
+                    reason=_reason(exc, language)))
+                return None
+
+        row.start = cell("start", _date)
+        row.end = cell("end", _date)
+        row.actual_start = cell("actual_start", _date)
+        row.actual_end = cell("actual_end", _date)
+        row.days = cell("days", _int)
+        row.actual_days = cell("actual_days", _int)
+        row.delay = cell("delay", _int)
+        row.progress = cell("progress", _ratio)
+        row.effort = cell("effort", _number)
 
         if not row.name and not row.has_plan:
             continue
@@ -456,6 +468,34 @@ class _CellError(str):
         self.value = value
         return self
 
+
+#: 「ここには何も無い」を表す書き方。手書きの表ではよく出るので空として扱う。
+BLANK_MARKS = {
+    "-", "‐", "‑", "–", "—", "ー", "―", "−", "─", "*", "n/a", "na", "tbd", "?", "？",
+    "未", "未定", "未着手", "なし", "無し", "無", "未実施", "―",
+}
+
+
+def _clean(value) -> str:
+    """セルの文字列を扱いやすい形にする。
+
+    全角の数字・記号は半角に直す (日本語入力では ３０％ のような値がよく入る)。
+    """
+    text = _unicodedata.normalize("NFKC", str(value)).strip()
+    # 全角スペースは NFKC で半角になるので、まとめて落とす
+    return " ".join(text.split())
+
+
+def _is_blank(value) -> bool:
+    """空、または「無し」を表す書き方か。"""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        text = _clean(value)
+        return not text or text.lower() in BLANK_MARKS
+    return False
+
+
 def _reason(exc: Exception, language: str) -> str:
     """例外から、その言語での理由を組み立てる。"""
     detail = exc.args[0] if exc.args else ""
@@ -472,9 +512,18 @@ def _text(value) -> str:
     return str(value).strip()
 
 
+#: 受け付ける日付の書き方
+DATE_FORMATS = (
+    "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+    "%Y年%m月%d日", "%m月%d日", "%m-%d",
+)
+
+
 def _date(value) -> Optional[_dt.date]:
+    if _is_blank(value):
+        return None
     day = _date_or_none(value)
-    if day is None and value not in (None, ""):
+    if day is None:
         raise ValueError(_CellError("cell_bad_date", value))
     return day
 
@@ -484,25 +533,34 @@ def _date_or_none(value) -> Optional[_dt.date]:
         return value.date()
     if isinstance(value, _dt.date):
         return value
-    if isinstance(value, str) and value.strip():
-        text = value.strip().replace("/", "-")
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%m-%d"):
-            try:
-                parsed = _dt.datetime.strptime(text, fmt)
-            except ValueError:
-                continue
-            if fmt == "%m-%d":
-                parsed = parsed.replace(year=_dt.date.today().year)
-            return parsed.date()
+    if _is_blank(value):
+        return None
+    text = _clean(value).replace("/", "-").replace(".", "-")
+    for fmt in DATE_FORMATS:
+        try:
+            parsed = _dt.datetime.strptime(text, fmt.replace("/", "-"))
+        except ValueError:
+            continue
+        if "%Y" not in fmt:
+            parsed = parsed.replace(year=_dt.date.today().year)
+        return parsed.date()
     return None
 
 
+#: 日数の後ろに付きがちな単位
+DAY_SUFFIXES = ("日間", "日", "days", "day", "d")
+
+
 def _int(value) -> Optional[int]:
-    if value in (None, ""):
+    if _is_blank(value):
         return None
     if isinstance(value, (int, float)):
         return int(value)
-    text = str(value).strip().replace("日", "").strip()
+    text = _clean(value)
+    for suffix in DAY_SUFFIXES:
+        if text.lower().endswith(suffix):
+            text = text[: -len(suffix)].strip()
+            break
     if not text:
         return None
     try:
@@ -512,26 +570,27 @@ def _int(value) -> Optional[int]:
 
 
 def _number(value) -> Optional[float]:
-    if value in (None, ""):
+    if _is_blank(value):
         return None
     if isinstance(value, (int, float)):
         return float(value)
     try:
-        return float(str(value).strip())
+        return float(_clean(value))
     except ValueError:
         raise ValueError(_CellError("cell_bad_number", value))
 
 
 def _ratio(value) -> Optional[float]:
-    """進捗。``0.8`` でも ``80%`` でも ``80`` でも受ける。"""
-    if value in (None, ""):
+    """進捗。``0.8`` でも ``80%`` でも ``80`` でも ``８０％`` でも受ける。"""
+    if _is_blank(value):
         return None
     if isinstance(value, (int, float)):
         number = float(value)
     else:
-        text = str(value).strip()
+        text = _clean(value)
+        percent = text.endswith("%")
         try:
-            number = float(text.rstrip("%")) / (100.0 if text.endswith("%") else 1.0)
+            number = float(text.rstrip("%").strip()) / (100.0 if percent else 1.0)
         except ValueError:
             raise ValueError(_CellError("cell_bad_progress", value))
     if number > 1.0:
