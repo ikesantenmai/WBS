@@ -179,6 +179,10 @@ Because these sheets are filled in by hand, the following are also accepted.
 - Days as `10`, `10日`, `10 days`, `10d`
 - Progress as `0.8`, `80%`, `80`
 
+**Vertically merged cells are read too.** Excel keeps a merged cell's value
+only in its top-left cell, but shows it across the whole range, so the rows
+below read the same value (dates and group names are often merged this way).
+
 **A cell that cannot be read does not discard the row.** Only that field is
 left empty, and the row and column are reported on screen, so a single typo
 never makes a whole row disappear.
@@ -218,7 +222,8 @@ Counts are in working days, and the day itself counts as zero (if today is the
 planned end date, it reads "Remaining 0 d"). The delay is also written into the
 Delay column.
 
-A row with no planned dates cannot be judged, so whatever status was written
+An actual end date makes a row Done even with no planned dates. Otherwise a
+row with no planned dates cannot be judged, so whatever status was written
 stays. The colours match the original file (done grey, delayed pink,
 remaining orange, upcoming light blue).
 

@@ -421,3 +421,68 @@ def test_the_status_is_written_in_the_language(make_filled, language, expected):
          dt.date(2026, 6, 1), None, dt.date(2026, 6, 5), None, None, "", "設計", ""),
     ])
     assert read(path, language=language, base_date=BASE).rows[0].status == expected
+
+
+# ---------------------------------------------------------------- 結合セル
+def _merge(path, ranges):
+    book = openpyxl.load_workbook(path)
+    for cells in ranges:
+        book[SHEET_PLAN].merge_cells(cells)
+    book.save(path)
+
+
+def test_a_vertically_merged_cell_reaches_every_row(make_filled):
+    """縦に結合した列は、下の行からも同じ値が読めること。
+
+    Excel は結合セルの値を左上にしか持たないが、画面では範囲すべてに
+    表示される。手作りの表では日付を縦に結合してあることがある。
+    """
+    path = make_filled("merged.xlsx", rows=[
+        ("開発", "", str(i), f"タスク{i}", dt.date(2026, 4, 1), 10, dt.date(2026, 4, 14),
+         dt.date(2026, 4, 1), None, dt.date(2026, 4, 10) if i == 1 else None,
+         None, None, "", "設計", "")
+        for i in (1, 2, 3)
+    ])
+    _merge(path, ["K5:K7"])          # 実績終了日を 3 行ぶん結合
+
+    rows = read(path, base_date=BASE).rows
+    assert len(rows) == 3
+    assert all(r.actual_end == dt.date(2026, 4, 10) for r in rows)
+    assert all(r.progress == 1.0 for r in rows)
+    assert all(r.status == "完了" for r in rows)
+
+
+def test_merged_group_cells_do_not_create_empty_rows(make_filled):
+    """大項目を広く結合してあっても、データの無い行は増やさない。"""
+    path = make_filled("merged-group.xlsx", rows=[
+        ("開発", "設計", str(i), f"タスク{i}", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), None, None, None, None, None, "", "設計", "")
+        for i in (1, 2)
+    ])
+    _merge(path, ["B5:B20", "C5:C20"])   # データは 2 行しかない
+
+    rows = read(path, base_date=BASE).rows
+    assert len(rows) == 2
+    assert [r.group for r in rows] == ["開発", "開発"]
+    assert [r.subgroup for r in rows] == ["設計", "設計"]
+
+
+# ---------------------------------------------------------------- 予定が無い行
+def test_an_actual_end_date_completes_a_row_without_planned_dates(make_filled):
+    """予定の日付が無くても、実績の終了日があれば完了とする。"""
+    path = make_filled("no-plan.xlsx", rows=[
+        ("開発", "", "1", "実績だけ記録", None, None, None,
+         dt.date(2026, 4, 1), None, dt.date(2026, 4, 10), None, None, "", "設計", ""),
+    ])
+    row = read(path, base_date=BASE).rows[0]
+    assert row.progress == 1.0
+    assert row.status == "完了"
+
+
+def test_a_row_with_neither_plan_nor_actual_end_keeps_its_status(make_filled):
+    path = make_filled("no-plan2.xlsx", rows=[
+        ("開発", "", "1", "保留中", None, None, None,
+         None, None, None, None, None, "", "設計", "保留"),
+    ])
+    row = read(path, base_date=BASE).rows[0]
+    assert row.status == "保留"

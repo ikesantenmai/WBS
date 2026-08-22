@@ -93,6 +93,9 @@ MEMBER_SKIP = ({text.member_title for text in LABELS.values()}
 HEADER_SEARCH_ROWS = 20
 HEADER_SEARCH_COLS = 40
 
+#: 結合セルを展開する上限 (列まるごとの結合などで膨らまないように)
+MAX_MERGED_CELLS = 20000
+
 
 @dataclass
 class Row:
@@ -242,14 +245,15 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
 def _resolve_status(row: Row, calendar, base: _dt.date, text, finished: bool) -> None:
     """遅れの日数と状態を求めて書き込む。
 
-    予定の日付が無い行は判断できないので、書かれた状態をそのまま残す。
+    実績の終了日があれば、予定の日付が無くても完了とする。
+    それ以外で予定の日付が無い行は判断できないので、書かれた状態を残す。
     """
-    if row.start is None and row.end is None:
-        return
-
     if finished:
         _set(row, "delay", None)
         _set(row, "status", text.status_done)
+        return
+
+    if row.start is None and row.end is None:
         return
 
     delay = _delay_days(row, calendar, base)
@@ -376,6 +380,28 @@ def _read_title(sheet, header_row: int) -> str:
 
 
 # ----------------------------------------------------------------------
+def _merged_values(sheet) -> Dict[tuple, object]:
+    """結合セルの中のどのセルからでも、左上の値を引けるようにする。
+
+    Excel では結合セルの値は左上にしか入っていないが、画面では結合した
+    範囲すべてに表示される。手作りの WBS では日付や大項目を縦に結合して
+    あることがあり、そのままでは 2 行目以降が空に見えてしまう。
+    """
+    out: Dict[tuple, object] = {}
+    for merged in sheet.merged_cells.ranges:
+        rows = merged.max_row - merged.min_row + 1
+        cols = merged.max_col - merged.min_col + 1
+        if rows * cols > MAX_MERGED_CELLS or len(out) > MAX_MERGED_CELLS:
+            continue
+        value = sheet.cell(row=merged.min_row, column=merged.min_col).value
+        if value is None:
+            continue
+        for row in range(merged.min_row, merged.max_row + 1):
+            for col in range(merged.min_col, merged.max_col + 1):
+                out[(row, col)] = value
+    return out
+
+
 def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
     """記入された行を読む。空行は飛ばす。
 
@@ -386,12 +412,19 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
     warnings: List[str] = []
     group = subgroup = ""
     text = labels(language)
+    merged = _merged_values(sheet)
 
     for index in range(first_row, (sheet.max_row or first_row) + 1):
-        raw = {key: sheet.cell(row=index, column=col).value
+        # 行が空かどうかは、その行自身に書かれた値だけで判断する
+        # (結合セルの引き継ぎで、空行が埋まって見えないように)
+        own = {key: sheet.cell(row=index, column=col).value
                for key, col in columns.items()}
-        if all(_is_blank(v) for v in raw.values()):
+        if all(_is_blank(v) for v in own.values()):
             continue
+        raw = {
+            key: (own[key] if not _is_blank(own[key]) else merged.get((index, col)))
+            for key, col in columns.items()
+        }
 
         row = Row(row=index)
         row.name = _text(raw.get("name"))
