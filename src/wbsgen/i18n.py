@@ -234,6 +234,10 @@ MESSAGES = {
         "cell_bad_number": "数値として読めません: {value!r}",
         "cell_bad_progress": "進捗として読めません: {value!r}",
         "cell_prefix": "{row} 行目「{column}」: {reason}",
+        "cell_formula": "{row} 行目「{column}」: 数式の計算結果が保存されていません。"
+                        "Excel で開いて保存し直してください。",
+        "missing_columns": "次の列が見つかりませんでした: {columns}",
+        "list_separator": "、",
         "too_many_rows": "{maximum} 行を超えたので、以降は読み飛ばしました。",
         "imported_title": "読み込んだ WBS",
 
@@ -267,6 +271,10 @@ MESSAGES = {
         "cell_bad_number": "Cannot read as a number: {value!r}",
         "cell_bad_progress": "Cannot read as progress: {value!r}",
         "cell_prefix": "Row {row}, \"{column}\": {reason}",
+        "cell_formula": "Row {row}, \"{column}\": the formula result is not stored."
+                        " Please open the file in Excel and save it again.",
+        "missing_columns": "No column found for: {columns}",
+        "list_separator": ", ",
         "too_many_rows": "More than {maximum} rows; the rest were skipped.",
         "imported_title": "Imported WBS",
 

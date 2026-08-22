@@ -486,3 +486,57 @@ def test_a_row_with_neither_plan_nor_actual_end_keeps_its_status(make_filled):
     ])
     row = read(path, base_date=BASE).rows[0]
     assert row.status == "保留"
+
+
+# ---------------------------------------------------------------- 数式のセル
+def _put_formula(path, cell, formula, sheet=SHEET_PLAN):
+    book = openpyxl.load_workbook(path)
+    book[sheet][cell] = formula
+    book.save(path)
+
+
+def test_a_formula_without_a_stored_result_is_reported(make_filled):
+    """数式の計算結果が入っていないセルは、空として扱ったうえで知らせる。
+
+    Excel は数式の計算結果もファイルに残すが、スクリプトで作られた
+    ファイルには入っていない。そのまま読むと空に見えるので、記入した
+    つもりの実績終了日が反映されず、完了にならない。
+    """
+    path = make_filled("formula.xlsx", rows=[
+        ("開発", "", "1", "数式で終了日", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), dt.date(2026, 4, 1), None, None, None, None,
+         "", "設計", ""),
+    ])
+    _put_formula(path, "K5", "=I5+20")   # 実績の終了日
+
+    imported = read(path, base_date=BASE)
+    assert imported.rows[0].actual_end is None
+    assert any("5 行目" in w and "数式" in w for w in imported.warnings), \
+        imported.warnings
+
+
+def test_a_formula_warning_is_translated(make_filled):
+    path = make_filled("formula-en.xlsx", language="en", rows=[
+        ("Dev", "", "1", "formula", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), dt.date(2026, 4, 1), None, None, None, None,
+         "", "Design", ""),
+    ])
+    _put_formula(path, "K5", "=I5+20", sheet="Schedule")
+
+    imported = read(path, language="en", base_date=BASE)
+    assert any("formula" in w for w in imported.warnings), imported.warnings
+
+
+# ---------------------------------------------------------------- 列が無い表
+def test_a_missing_column_is_reported(filled_book):
+    """見出しが違っていて列が見つからないときは、まとめて知らせる。"""
+    book = openpyxl.load_workbook(filled_book)
+    book[SHEET_PLAN]["K4"] = "おわり"    # 実績の「終了」を別の言葉にする
+    book.save(filled_book)
+
+    warnings = read(filled_book, base_date=BASE).warnings
+    assert any("終了" in w for w in warnings), warnings
+
+
+def test_a_complete_sheet_has_no_warnings(filled_book):
+    assert read(filled_book, base_date=BASE).warnings == []

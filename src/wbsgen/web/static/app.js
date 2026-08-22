@@ -194,6 +194,7 @@ let workdays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 let mode = 'blank';        // 'blank' = 新規作成 / 'chart' = 読み込んだ WBS
 let pending = null;
 let loadedFile = null;     // 読み込み中のファイル (単位を変えて読み直すため)
+let importToken = 0;       // 読み込みの通し番号 (古い応答を捨てるため)
 let suggestedTitle = '';   // 提案したプロジェクト名 (書き換えられたか判る)
 
 const $ = (sel) => document.querySelector(sel);
@@ -616,10 +617,13 @@ async function importFile(file, unit = null) {
   const body = new FormData();
   body.append('file', file);
   const query = unit ? `&unit=${encodeURIComponent(unit)}` : '';
+  const token = ++importToken;
   try {
     const response = await api(`/api/import?lang=${language}${query}`,
                                { method: 'POST', body });
     const model = await response.json();
+    // 待っている間に「戻る」や別の読み込みが起きていたら、この結果は捨てる
+    if (token !== importToken) return;
     loadedFile = file;
     setMode('chart');
     $('#chart-unit').value = model.timeline.unit;
@@ -638,6 +642,7 @@ async function importFile(file, unit = null) {
     });
     if (!unit) banner(t('imported', { name: file.name }), true);
   } catch (error) {
+    if (token !== importToken) return;
     banner(t('cannot_import', { reason: error.message }));
   }
 }
@@ -772,6 +777,7 @@ function bind() {
   $('#btn-build').addEventListener('click', download);
   $('#btn-export').addEventListener('click', exportChart);
   $('#btn-back').addEventListener('click', () => {
+    importToken += 1;   // 読み込み中なら、その結果は捨てる
     loadedFile = null;
     setMode('blank');
     banner('');

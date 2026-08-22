@@ -187,6 +187,19 @@ below read the same value (dates and group names are often merged this way).
 left empty, and the row and column are reported on screen, so a single typo
 never makes a whole row disappear.
 
+**You are also told *why* a cell looks empty.** When a date or a progress
+value you filled in does not show up, it is usually one of these two. Both are
+reported on screen when the file is read.
+
+- **The formula result is not stored in the file.** Excel saves the result of
+  a formula alongside the formula itself, but files written by a script do
+  not. Such a cell reads as empty, so an actual end date written as, say,
+  `=I5+20` never marks the row Done. **Open the file in Excel and save it
+  again** and the result is stored, after which it reads fine.
+- **A heading was changed, so the column is not found.** Renaming "End" to
+  something else makes that whole column read as empty. The names of the
+  columns that could not be found are listed.
+
 #### How days and progress are decided
 
 Values are taken from what is filled in, as follows. Derived values are shown

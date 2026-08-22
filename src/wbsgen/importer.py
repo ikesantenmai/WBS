@@ -173,6 +173,9 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     config = _read_config(book)
     first_row = header_row + (2 if config.get("unit") == UNIT_DAY else 1)
     rows, warnings = _read_rows(sheet, first_row, columns, lang)
+    warnings = (_missing_column_warnings(columns, lang)
+                + _formula_warnings(source, sheet.title, columns, rows, lang)
+                + warnings)
 
     spec = _build_spec(config, rows, book, filename, lang)
     resolve(rows, spec.calendar(), base_date, lang)
@@ -294,6 +297,66 @@ def _set(row: Row, key: str, value) -> None:
     setattr(row, key, value)
     if row.written.get(key) != value:
         row.derived.add(key)
+
+
+#: 日数・進捗・状態の計算に効く列 (見つからなければ知らせる)
+IMPORTANT_COLUMNS = ("start", "end", "days", "actual_start", "actual_end",
+                     "actual_days", "progress")
+
+
+def _missing_column_warnings(columns: Dict[str, int], language: str) -> List[str]:
+    """計算に効く列が見つからなかったら知らせる。
+
+    見出しの文字が違っていると、その列がまるごと空として読まれるため。
+    """
+    text = labels(language)
+    missing = [text.columns[key] for key in IMPORTANT_COLUMNS if key not in columns]
+    if not missing:
+        return []
+    joined = message(language, "list_separator").join(missing)
+    return [message(language, "missing_columns", columns=joined)]
+
+
+def _formula_warnings(source, sheet_name: str, columns: Dict[str, int],
+                      rows: List[Row], language: str) -> List[str]:
+    """空に見えるセルが実は数式なら、計算結果が無いことを知らせる。
+
+    Excel は数式の計算結果をファイルに残すが、スクリプトなどで作られた
+    ファイルには入っていないことがある。そのまま読むと空に見えるので、
+    記入したつもりの日付や進捗が反映されない。
+    """
+    blanks = [
+        (row.row, key, columns[key])
+        for row in rows
+        for key in IMPORTANT_COLUMNS
+        if key in columns and getattr(row, key, None) is None
+    ]
+    if not blanks:
+        return []
+
+    formulas = _formula_sheet(source, sheet_name)
+    if formulas is None:
+        return []
+
+    text = labels(language)
+    out = []
+    for index, key, col in blanks:
+        value = formulas.cell(row=index, column=col).value
+        if isinstance(value, str) and value.startswith("="):
+            out.append(message(language, "cell_formula", row=index,
+                               column=text.columns.get(key, key)))
+    return out[:20]
+
+
+def _formula_sheet(source, sheet_name: str):
+    """数式を読むためにもう一度開く。開けなければ ``None``。"""
+    try:
+        if hasattr(source, "seek"):
+            source.seek(0)
+        book = load_workbook(source, data_only=False, read_only=True)
+    except Exception:  # noqa: BLE001 - 診断用なので、失敗したら黙って諦める
+        return None
+    return book[sheet_name] if sheet_name in book.sheetnames else book.worksheets[0]
 
 
 def _pick_sheet(book, names):
