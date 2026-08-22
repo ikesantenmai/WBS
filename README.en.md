@@ -205,14 +205,25 @@ reported on screen when the file is read.
 Values are taken from what is filled in, as follows. Derived values are shown
 in a lighter font, with the reason on hover.
 
+**The number written in a Days cell is never used.** It is cleared, then
+counted again from the start and end dates. This applies to both plan and
+actual.
+
 | What is filled in | What follows |
 |-------------------|--------------|
-| Planned start and end | **Days are counted from those two** (working days, both ends included); this wins over a written number |
+| Planned start and end | **Days are counted again from those two** (working days, both ends included) |
 | Planned start and days only | The end date is derived from the days |
-| Actual start and end | **Actual days are counted from those two** |
+| No planned start | **Days are left empty** (there is nothing to count from) |
+| Actual start and end | **Actual days are counted again from those two** |
 | Actual start and days only | An end date is derived from the actual days (so the bar can be drawn) |
+| No actual start | **Actual days are left empty** |
 | An actual end date | **Progress becomes 100%**; this wins over a written value |
 | Planned dates | **The status and delay are calculated** (see below) |
+
+Only a row with no end date works the other way round: the end date is
+derived from the days that were written, so the bar can be drawn. Counting
+back from that derived end gives the same number, so the days stay as they
+were.
 
 Only an actual end date that is *written in* counts as finished. An end date
 **derived** from the actual days does not (otherwise a task in progress would

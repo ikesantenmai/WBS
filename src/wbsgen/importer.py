@@ -193,13 +193,15 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
             language: str = DEFAULT_LANGUAGE) -> List[Row]:
     """記入内容から日数・終了日・進捗・状態を導き出す。
 
-    - 予定の日数は、予定の開始日と終了日から数える (稼働日、両端を含む)
-    - 実績の日数は、実績の開始日と終了日から数える
+    - 予定の日数は、セルの値を捨てて予定の開始日と終了日から数え直す
+      (稼働日、両端を含む)
+    - 実績の日数も同じく、実績の開始日と終了日から数え直す
     - 実績の終了日が**記入されていれば**、進捗は 100% とみなす
     - 状態は「完了 / 遅れ n 日 / 残り n 日 / あと n 日」を基準日から求める
 
     終了日が書かれていない行は、代わりに日数から終了日を求める
     (バーを描くため)。この場合は「終わった」とはみなさない。
+    開始日と終了日が揃わず数え直せない行は、日数を空にする。
 
     書かれた値は :attr:`Row.written` に控えてあるので、基準日を変えて
     何度呼んでも同じ結果になる。
@@ -215,25 +217,12 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
         row.derived = set()
 
         # --- 予定 ---
-        if row.start and row.end:
-            days = calendar.workdays_between(row.start, row.end)
-            if days != row.days:
-                row.derived.add("days")
-            row.days = days
-        elif row.start and row.days:
-            row.end = calendar.end_date(row.start, row.days)
-            row.derived.add("end")
+        _resolve_span(row, calendar, "start", "days", "end")
 
         # --- 実績 ---
+        # 終了日が書かれていたかどうかは、補う前に見ておく
         finished = row.is_finished
-        if row.actual_start and row.actual_end:
-            days = calendar.workdays_between(row.actual_start, row.actual_end)
-            if days != row.actual_days:
-                row.derived.add("actual_days")
-            row.actual_days = days
-        elif row.actual_start and row.actual_days:
-            row.actual_end = calendar.end_date(row.actual_start, row.actual_days)
-            row.derived.add("actual_end")
+        _resolve_span(row, calendar, "actual_start", "actual_days", "actual_end")
 
         # --- 進捗 ---
         if finished and row.progress != 1.0:
@@ -243,6 +232,32 @@ def resolve(rows: List[Row], calendar, base_date: Optional[_dt.date] = None,
         # --- 遅れと状態 ---
         _resolve_status(row, calendar, base, text, finished)
     return rows
+
+
+def _resolve_span(row: Row, calendar, start_key: str, days_key: str,
+                  end_key: str) -> None:
+    """開始日・日数・終了日のうち、書かれていないものを埋める。
+
+    日数はセルに書かれた値を使わず、**開始日と終了日から数え直す**
+    (稼働日、両端を含む)。書かれた日数はいったん無かったものとして扱う。
+
+    終了日が書かれていない行だけは、逆に書かれた日数から終了日を補う
+    (ガントチャートのバーを描くため)。補った終了日から数え直しても
+    同じ日数になるので、日数は書かれたまま残る。
+
+    どちらの日付も揃わず数え直せない行は、日数を空にする。
+    """
+    start = getattr(row, start_key)
+    end = getattr(row, end_key)
+    days = getattr(row, days_key)
+
+    if start and end:
+        _set(row, days_key, calendar.workdays_between(start, end))
+    elif start and days:
+        _set(row, end_key, calendar.end_date(start, days))
+    else:
+        _set(row, days_key, None)
+
 
 
 def _resolve_status(row: Row, calendar, base: _dt.date, text, finished: bool) -> None:

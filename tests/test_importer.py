@@ -318,6 +318,64 @@ def test_days_that_already_match_are_not_marked_as_derived(make_filled):
     assert "days" not in read(path).rows[0].derived
 
 
+def test_days_are_cleared_when_they_cannot_be_counted(make_filled):
+    """開始日が無く数え直せない行は、書かれた日数を残さず空にする。
+
+    日数は開始日と終了日から数え直すものなので、片方しか無い行に
+    書かれた数字は当てにできない。
+    """
+    path = make_filled("c1.xlsx", rows=[
+        ("開発", "", "1", "開始日なし", None, 12, dt.date(2026, 4, 14),
+         None, 12, dt.date(2026, 4, 14), None, None, "", "設計", ""),
+    ])
+    row = read(path, base_date=BASE).rows[0]
+    assert row.days is None
+    assert row.actual_days is None
+    assert "days" in row.derived
+    assert "actual_days" in row.derived
+
+
+def test_days_alone_without_any_date_are_cleared(make_filled):
+    path = make_filled("c2.xlsx", rows=[
+        ("開発", "", "1", "日数だけ", None, 7, None,
+         None, 7, None, None, None, "", "設計", ""),
+    ])
+    row = read(path, base_date=BASE).rows[0]
+    assert row.days is None
+    assert row.actual_days is None
+
+
+def test_days_still_derive_a_missing_end_date(make_filled):
+    """終了日が無い行だけは、書かれた日数から終了日を補って残す。"""
+    path = make_filled("c3.xlsx", rows=[
+        ("開発", "", "1", "終了日なし", dt.date(2026, 4, 1), 10, None,
+         dt.date(2026, 4, 1), 5, None, None, None, "", "設計", ""),
+    ])
+    row = read(path, base_date=BASE).rows[0]
+    assert row.end == dt.date(2026, 4, 14)
+    assert row.days == 10                # 補った終了日から数えても同じ
+    assert row.actual_end == dt.date(2026, 4, 7)
+    assert row.actual_days == 5
+
+
+def test_recounted_days_are_written_out(make_filled, tmp_path):
+    """書き出した Excel の日数欄にも、数え直した値が入る。"""
+    from wbsgen.workbook import export
+
+    path = make_filled("c4.xlsx", rows=[
+        ("開発", "", "1", "でたらめな日数", dt.date(2026, 4, 1), 99,
+         dt.date(2026, 4, 14), dt.date(2026, 4, 1), 99, dt.date(2026, 4, 10),
+         None, None, "", "設計", ""),
+        ("開発", "", "2", "数え直せない", None, 12, dt.date(2026, 4, 14),
+         None, 12, dt.date(2026, 4, 14), None, None, "", "設計", ""),
+    ])
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert (sheet["G5"].value, sheet["J5"].value) == (10, 8)
+    assert (sheet["G6"].value, sheet["J6"].value) == (None, None)
+
+
 def test_the_working_calendar_is_used_for_counting(make_filled):
     """稼働曜日の設定が数え方に効く (土曜も稼働にすると日数が増える)。"""
     weekdays = ["mon", "tue", "wed", "thu", "fri", "sat"]
