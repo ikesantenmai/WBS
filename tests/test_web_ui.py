@@ -61,28 +61,44 @@ def server():
 
 
 @pytest.fixture(scope="module")
-def page(server):
+def browser():
     with sync_playwright() as playwright:
         launch = {"args": ["--no-sandbox"]}
         path = _chromium_path()
         if path:
             launch["executable_path"] = path
         try:
-            browser = playwright.chromium.launch(**launch)
+            instance = playwright.chromium.launch(**launch)
         except Exception as exc:  # noqa: BLE001 - ブラウザが無い環境では skip
             pytest.skip(f"Chromium を起動できません: {exc}")
-
-        context = browser.new_context(viewport={"width": 1440, "height": 900},
-                                      accept_downloads=True)
-        view = context.new_page()
-        errors = []
-        view.on("pageerror", lambda e: errors.append(str(e)))
-        view.errors = errors
-        view.goto(server, wait_until="networkidle")
-        view.wait_for_selector("table.wbs tbody tr")
-        yield view
+        yield instance
         with contextlib.suppress(Exception):
-            browser.close()
+            instance.close()
+
+
+def _open(browser, server, **context_options):
+    """指定した画面の大きさでアプリを開き、最初の描画まで待つ。"""
+    context = browser.new_context(accept_downloads=True, **context_options)
+    view = context.new_page()
+    errors = []
+    view.on("pageerror", lambda e: errors.append(str(e)))
+    view.errors = errors
+    view.goto(server, wait_until="networkidle")
+    # 狭い画面では表が畳まれていることがあるので、出来ていることだけ確かめる
+    view.wait_for_selector("table.wbs tbody tr", state="attached")
+    return view
+
+
+@pytest.fixture(scope="module")
+def page(browser, server):
+    return _open(browser, server, viewport={"width": 1440, "height": 900})
+
+
+@pytest.fixture(scope="module")
+def phone(browser, server):
+    """スマートフォン相当の画面 (iPhone くらいの幅) で開いたページ。"""
+    return _open(browser, server, viewport={"width": 390, "height": 844},
+                 device_scale_factor=2, is_mobile=True, has_touch=True)
 
 
 def _reset(page):
@@ -333,3 +349,85 @@ def test_downloading_in_english(page, tmp_path):
     assert openpyxl.load_workbook(saved).sheetnames == ["Schedule", "Members", "Settings"]
     _set_language(page, "ja")
     assert page.errors == []
+
+
+# ------------------------------------------------ スマートフォン (狭い画面)
+def _phone_reset(phone):
+    """新規作成の指定タブに戻す。"""
+    if phone.is_visible("#btn-back"):
+        phone.click("#btn-back")
+    phone.wait_for_selector("#pane-tabs:not([hidden])")
+    phone.click('.pane-tab[data-pane="form"]')
+
+
+def test_the_phone_layout_switches_between_the_form_and_the_preview(phone):
+    _phone_reset(phone)
+    assert phone.is_visible("#spec-form")
+    assert phone.is_hidden("#sheet")
+
+    phone.click('.pane-tab[data-pane="preview"]')
+    assert phone.is_visible("#sheet")
+    assert phone.is_hidden("#spec-form")
+    assert phone.errors == []
+
+
+def test_the_phone_page_never_scrolls_sideways(phone):
+    """本文がはみ出さないこと (横に振れる画面は使いにくい)。"""
+    _phone_reset(phone)
+    width, client = phone.evaluate(
+        "[document.body.scrollWidth, document.body.clientWidth]")
+    assert width <= client
+
+
+def test_the_phone_shows_the_chart_next_to_the_names(phone, filled_book):
+    """既定では項目だけを出して、日程表を画面に入れる。"""
+    phone.set_input_files("#import-file", str(filled_book))
+    phone.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+    headers = phone.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(2) th", "n => n.map(x => x.textContent)")
+    assert headers == ["項目"]
+    # 日程表が画面の中に入っている
+    left = phone.eval_on_selector("svg.chart-body", "n => n.getBoundingClientRect().left")
+    assert left < 390
+    assert phone.errors == []
+
+
+def test_the_phone_keeps_the_names_in_view_while_scrolling(phone, filled_book):
+    phone.set_input_files("#import-file", str(filled_book))
+    phone.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+    phone.select_option("#columns-mode", "min")
+
+    phone.eval_on_selector(".sheet", "n => n.scrollLeft = 600")
+    phone.wait_for_timeout(100)
+    left = phone.eval_on_selector("table.wbs", "n => n.getBoundingClientRect().left")
+    assert 0 <= left < 40                    # 貼り付いたまま
+    assert phone.eval_on_selector("table.wbs tbody td", "n => n.textContent") == "要件定義"
+
+
+def test_the_phone_can_show_more_columns(phone, filled_book):
+    phone.set_input_files("#import-file", str(filled_book))
+    phone.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+    phone.select_option("#columns-mode", "key")
+    assert phone.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(2) th", "n => n.length") == 7
+    phone.select_option("#columns-mode", "all")
+    assert phone.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(2) th", "n => n.length") == 16
+    phone.select_option("#columns-mode", "min")
+    assert phone.errors == []
+
+
+def test_the_desktop_keeps_every_column(page, filled_book):
+    """広い画面はこれまでどおり (列を減らす選択も出さない)。"""
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+    assert page.eval_on_selector_all(
+        "table.wbs thead tr:nth-child(2) th", "n => n.length") == 16
+    assert page.is_hidden("#columns-field")
+    assert page.is_hidden("#pane-tabs")

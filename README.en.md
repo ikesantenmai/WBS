@@ -154,6 +154,28 @@ The period, sheet and working-day settings are on the left; a preview with
 calendar is built by exactly the same code as the command line, so you can
 check it before downloading.
 
+### On a phone
+
+The layout follows the width of the screen. It is the **same URL** — there is
+no app to install.
+
+- **760px and narrower** (a phone held upright): there is no room to put the
+  settings next to the calendar, so the **Settings / Preview** tabs at the top
+  switch between them. Buttons are sized for a finger, and the fields use a
+  type size iOS will not zoom into.
+- **900px and narrower** (a phone on its side, or a small window): the full
+  table would leave no room for the calendar, so a **Columns** control appears
+  in the toolbar.
+
+| Columns | What you get |
+|---------|--------------|
+| **Name only** (the default when narrow) | Just the task name, pinned to the left while you swipe the calendar sideways |
+| **Key columns** | Name, planned and actual dates, progress and status |
+| **All** | The same 16 columns as the Excel file |
+
+On a wide screen nothing changes: the settings sit next to the table and every
+column is shown.
+
 ### Viewing a filled-in file as a Gantt chart
 
 "Import Excel" takes a WBS made by this tool and filled in, and shows the table

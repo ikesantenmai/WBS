@@ -26,6 +26,28 @@ const TABLE_COLUMNS = [
   { key: 'status', width: 62, cls: 'status' },
 ];
 
+/*
+ * 狭い画面で出す列。スマートフォンの幅では表と日程表を全部は置けないので、
+ * 出す列を選べるようにする (値は列幅 px)。
+ *
+ *   min  項目だけ    — 日程表を広く使う (狭い画面の既定)
+ *   key  主要な列    — 日付・進捗・状態まで
+ *   all  すべての列  — Excel と同じ
+ */
+const COLUMN_SETS = {
+  min: { name: 128 },
+  key: {
+    name: 118, start: 42, end: 42, actual_start: 42, actual_end: 42,
+    progress: 38, status: 58,
+  },
+};
+const COLUMN_MODES = ['min', 'key', 'all'];
+
+//: この幅より狭いと、表を全部出すと日程表が見えなくなる (列を選べるようにする)
+const NARROW = window.matchMedia('(max-width: 900px)');
+//: この幅より狭いと、指定フォームと日程表を横に並べられない (タブで切り替える)
+const PHONE = window.matchMedia('(max-width: 760px)');
+
 // 画面の文言。既定は日本語。
 const UI = {
   ja: {
@@ -56,6 +78,12 @@ const UI = {
     preview: 'プレビュー',
     chart: 'ガントチャート',
     chart_unit: '表示単位',
+    columns_shown: '列',
+    columns_min: '項目のみ',
+    columns_key: '主要な列',
+    columns_all: 'すべて',
+    pane_form: '指定',
+    pane_preview: 'プレビュー',
     hint_blank: '実際の Excel と同じ列・同じ見出しです',
     hint_chart: '記入済みの Excel を読み込んで表示しています',
     columns: {
@@ -125,6 +153,12 @@ const UI = {
     preview: 'Preview',
     chart: 'Gantt chart',
     chart_unit: 'Unit',
+    columns_shown: 'Columns',
+    columns_min: 'Name only',
+    columns_key: 'Key columns',
+    columns_all: 'All',
+    pane_form: 'Settings',
+    pane_preview: 'Preview',
     hint_blank: 'The same columns and headers as the Excel file',
     hint_chart: 'Imported from a filled-in Excel file',
     columns: {
@@ -195,6 +229,9 @@ let mode = 'blank';        // 'blank' = 新規作成 / 'chart' = 読み込んだ
 let pending = null;
 let loadedFile = null;     // 読み込み中のファイル (単位を変えて読み直すため)
 let importToken = 0;       // 読み込みの通し番号 (古い応答を捨てるため)
+let pane = 'form';         // 狭い画面でどちらを見せているか ('form' / 'preview')
+let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
+let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
 let suggestedTitle = '';   // 提案したプロジェクト名 (書き換えられたか判る)
 
 const $ = (sel) => document.querySelector(sel);
@@ -321,6 +358,7 @@ function scheduleRefresh(delay = 250) {
  * 記入済みを読み込んだときは日程表にバーが載る。
  */
 function render(view) {
+  lastView = view;
   const { timeline } = view;
   const colW = CHART_WIDTH[timeline.unit] || 42;
   const withWeekday = timeline.unit === 'day';
@@ -330,7 +368,8 @@ function render(view) {
   const bodyH = Math.max(rowCount, 1) * ROW_H;
   const width = timeline.columns.length * colW;
 
-  const grid = el('div', { class: 'grid' },
+  // 表が広いまま貼り付くと日程表に届かないので、そのときは一緒に流す
+  const grid = el('div', { class: `grid${isCompact() ? '' : ' scroll-table'}` },
     el('div', { class: 'table-wrap' }, buildTable(view, rowCount, withWeekday)),
     el('div', { class: 'chart-wrap' },
       chartHead(timeline, colW, width, headH, withWeekday),
@@ -347,6 +386,40 @@ function render(view) {
   renderTotals(view.totals);
 }
 
+/** 画面幅や列の指定が変わったときに、同じ内容を描き直す。 */
+function redraw() {
+  if (lastView) render(lastView);
+}
+
+/** 表を全部出すと日程表が見えなくなる幅か。 */
+function isNarrow() {
+  return NARROW.matches;
+}
+
+/** 指定フォームと日程表を横に並べられない幅か。 */
+function isPhone() {
+  return PHONE.matches;
+}
+
+/** いま使う列の組。広い画面や「すべて」を選んでいるときは ``null``。 */
+function columnSet() {
+  return isNarrow() ? COLUMN_SETS[columnsMode] || null : null;
+}
+
+/** 表を貼り付けたままにできるほど列が少ないか。 */
+function isCompact() {
+  return isNarrow() && columnsMode === 'min';
+}
+
+/** いま描く列。狭い画面では選んだ組に絞り、幅も詰める。 */
+function tableColumns() {
+  const set = columnSet();
+  if (!set) return TABLE_COLUMNS;
+  return TABLE_COLUMNS
+    .filter((c) => c.key in set)
+    .map((c) => ({ ...c, width: set[c.key] }));
+}
+
 function warningBox(warnings) {
   return el('div', { class: 'warnings' },
     el('strong', { text: t('warning_title') }),
@@ -355,33 +428,34 @@ function warningBox(warnings) {
 
 // ---------------------------------------------------------------- 表
 function buildTable(view, rowCount, withWeekday) {
+  const columns = tableColumns();
   const cols = el('colgroup');
-  for (const column of TABLE_COLUMNS) cols.append(el('col', { style: `width:${column.width}px` }));
+  for (const column of columns) cols.append(el('col', { style: `width:${column.width}px` }));
 
   const head = el('thead');
   const bandRow = el('tr');
   let i = 0;
-  while (i < TABLE_COLUMNS.length) {
-    const group = TABLE_COLUMNS[i].group || '';
+  while (i < columns.length) {
+    const group = columns[i].group || '';
     let span = 1;
-    while (i + span < TABLE_COLUMNS.length
-           && (TABLE_COLUMNS[i + span].group || '') === group) span++;
+    while (i + span < columns.length
+           && (columns[i + span].group || '') === group) span++;
     const label = group ? t(group === 'plan' ? 'group_plan' : 'group_actual') : '';
     bandRow.append(el('th', { colspan: span, text: label }));
     i += span;
   }
   head.append(bandRow);
-  head.append(el('tr', {}, ...TABLE_COLUMNS.map(
+  head.append(el('tr', {}, ...columns.map(
     (c) => el('th', { text: t('columns')[c.key] }))));
   if (withWeekday) {
-    head.append(el('tr', {}, ...TABLE_COLUMNS.map(() => el('th', {}))));
+    head.append(el('tr', {}, ...columns.map(() => el('th', {}))));
   }
 
   const body = el('tbody');
   for (let r = 0; r < rowCount; r++) {
     const row = view.rows[r] || null;
     const tr = el('tr');
-    for (const column of TABLE_COLUMNS) tr.append(tableCell(row, column, view.rows[r - 1]));
+    for (const column of columns) tr.append(tableCell(row, column, view.rows[r - 1]));
     body.append(tr);
   }
   return el('table', { class: 'wbs' }, cols, head, body);
@@ -664,6 +738,31 @@ function setMode(next) {
   $('#preview-title').textContent = t(chart ? 'chart' : 'preview');
   $('#preview-hint').textContent = t(chart ? 'hint_chart' : 'hint_blank');
   $('#tagline').textContent = t(chart ? 'tagline_chart' : 'tagline_blank');
+  applyNarrow();
+}
+
+// ------------------------------------------------------ スマートフォン向け
+/**
+ * 狭い画面では、指定フォームとプレビューを切り替えて 1 つずつ見せる。
+ * 読み込んだ WBS を見ている間はフォームが無いので、切り替えも要らない。
+ */
+function applyNarrow() {
+  const narrow = isNarrow();
+  const tabs = isPhone() && mode === 'blank';
+  $('#pane-tabs').hidden = !tabs;
+  $('#columns-field').hidden = !narrow;
+
+  const layout = document.querySelector('.layout');
+  layout.classList.toggle('pane-form', tabs && pane === 'form');
+  layout.classList.toggle('pane-preview', tabs && pane === 'preview');
+  for (const button of document.querySelectorAll('.pane-tab')) {
+    button.setAttribute('aria-pressed', String(button.dataset.pane === pane));
+  }
+}
+
+function showPane(next) {
+  pane = next;
+  applyNarrow();
 }
 
 // ---------------------------------------------------------------- 言語
@@ -726,6 +825,9 @@ function fillChoices() {
   $('#unit').value = unit;
   $('#chart-unit').replaceChildren(...options());
   $('#chart-unit').value = chartUnit;
+  $('#columns-mode').replaceChildren(...COLUMN_MODES.map(
+    (m) => el('option', { value: m, text: t(`columns_${m}`) })));
+  $('#columns-mode').value = columnsMode;
   renderWeekdays();
 }
 
@@ -791,6 +893,18 @@ function bind() {
     if (file) importFile(file);
     event.target.value = '';
   });
+
+  for (const button of document.querySelectorAll('.pane-tab')) {
+    button.addEventListener('click', () => showPane(button.dataset.pane));
+  }
+  $('#columns-mode').addEventListener('change', (event) => {
+    columnsMode = event.target.value;
+    redraw();
+  });
+  // 画面を回したり幅が変わったら、その幅に合わせて描き直す
+  for (const query of [NARROW, PHONE]) {
+    query.addEventListener('change', () => { applyNarrow(); redraw(); });
+  }
 }
 
 /** 空の WBS を書き出す。 */
@@ -850,6 +964,7 @@ async function start() {
   $('#language').value = language;
   fillChoices();
   buildForm();
+  applyNarrow();
   await refresh();
 }
 

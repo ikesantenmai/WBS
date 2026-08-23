@@ -24,6 +24,12 @@
 
 <div id="banner" class="banner" role="alert" hidden></div>
 
+<!-- 狭い画面では「指定」と「プレビュー」を切り替えて使う -->
+<nav id="pane-tabs" class="pane-tabs" hidden>
+  <button type="button" class="pane-tab" data-pane="form" data-i18n="pane_form"></button>
+  <button type="button" class="pane-tab" data-pane="preview" data-i18n="pane_preview"></button>
+</nav>
+
 <main class="layout">
   <!-- ============ 指定 ============ -->
   <form class="panel form" id="spec-form" autocomplete="off">
@@ -78,6 +84,9 @@
       <div class="spacer"></div>
       <label id="chart-unit-field" class="inline-field" hidden><span data-i18n="chart_unit"></span>
         <select id="chart-unit"></select>
+      </label>
+      <label id="columns-field" class="inline-field" hidden><span data-i18n="columns_shown"></span>
+        <select id="columns-mode"></select>
       </label>
       <span class="hint" id="preview-hint"></span>
     </div>

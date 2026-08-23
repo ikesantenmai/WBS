@@ -45,7 +45,10 @@ body { display: flex; flex-direction: column; }
   padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .topbar h1 { margin: 0; font-size: 15px; font-weight: 700; white-space: nowrap; }
-.tagline { font-size: 12px; color: var(--muted); }
+.tagline {
+  min-width: 0; font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .spacer { flex: 1 1 auto; }
 .lang-select {
   padding: 7px 8px; font: inherit; font-size: 12px;
@@ -53,6 +56,7 @@ body { display: flex; flex-direction: column; }
 }
 
 .btn {
+  display: inline-flex; align-items: center; justify-content: center;
   padding: 8px 16px; font: inherit; font-size: 13px;
   border: 1px solid var(--line); border-radius: 6px;
   background: #fff; color: var(--ink); cursor: pointer; white-space: nowrap;
@@ -74,7 +78,10 @@ body { display: flex; flex-direction: column; }
   display: grid; grid-template-columns: 320px minmax(0, 1fr);
   gap: 12px; padding: 12px; flex: 1 1 auto; min-height: 0;
 }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; min-width: 0; min-height: 0;
+}
 
 /* 読み込んだ WBS を表示している間は、指定フォームを畳んでチャートを広く使う */
 .layout.chart-mode { grid-template-columns: minmax(0, 1fr); }
@@ -121,11 +128,18 @@ body { display: flex; flex-direction: column; }
   border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink);
 }
 
-.sheet { flex: 1; overflow: auto; padding: 0; }
+.sheet {
+  flex: 1; overflow: auto; padding: 0;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
 
 /* 表 (左・固定) とチャート (右) を横に並べる */
 .grid { display: flex; align-items: flex-start; min-width: min-content; }
+/* どちらも縮めない (縮むと列幅が指定どおりにならず、行の高さもずれる) */
+.grid > * { flex: 0 0 auto; }
 .table-wrap { position: sticky; left: 0; z-index: 3; background: var(--panel); }
+/* 表が広いときは貼り付けない (貼ると日程表まで横スクロールできない) */
+.grid.scroll-table .table-wrap { position: static; }
 .chart-wrap { position: relative; }
 .chart-head { position: sticky; top: 0; z-index: 2; display: block; }
 svg.chart-body { display: block; }
@@ -176,9 +190,76 @@ table.wbs td.derived { color: #999; font-style: italic; }
 table.wbs td.chart.rest { background: var(--holiday); }
 table.wbs td.chart.saturday { background: var(--saturday); }
 table.wbs td.chart { border-right-color: var(--line-soft); border-bottom-color: var(--line-soft); }
-table.wbs th.sticky, table.wbs td.sticky { position: sticky; left: 0; z-index: 3; background: var(--panel); }
 
 .sheet-title {
   padding: 10px 14px 8px; font-size: 13px; font-weight: 700; color: #003300;
 }
 .empty-note { padding: 40px; text-align: center; color: var(--muted); }
+
+
+/* ================================================================
+ * スマートフォン (狭い画面)
+ *
+ * 指定フォームと日程表を横に並べる余裕が無いので、タブで切り替えて
+ * 1 つずつ見せる。表は主要な列だけにして、日程表を画面に出す。
+ * ================================================================ */
+
+/* 「指定 / プレビュー」の切り替え (狭い画面でだけ出る) */
+.pane-tabs {
+  display: flex; gap: 6px; padding: 8px 12px 0;
+}
+.pane-tab {
+  flex: 1; min-height: 40px; padding: 8px 10px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 8px 8px 0 0;
+  background: #fff; color: var(--muted); cursor: pointer;
+}
+.pane-tab[aria-pressed="true"] {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}
+
+/* ---- 表と日程表を並べる余裕が無い幅 (スマートフォン・小さな窓) ---- */
+@media (max-width: 900px) {
+  /* 上のバー: 題名で 1 行、操作ボタンで次の行 */
+  .topbar { flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
+  .topbar h1 { font-size: 14px; }
+  .tagline { display: none; }
+  .spacer { flex: 0 0 100%; height: 0; }
+  .topbar .btn { flex: 1 1 auto; min-height: 42px; }
+  .lang-select { min-height: 42px; }
+  .banner { padding: 9px 12px; }
+
+  /* プレビュー: 道具立てを折り返し、余白を詰める */
+  .toolbar { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
+  .toolbar .spacer { flex: 1 1 auto; height: auto; }
+  .hint { display: none; }
+  .inline-field select { min-height: 34px; }
+  .totals { gap: 4px 12px; padding: 8px 12px; }
+  .warnings, .sheet-title { padding-left: 12px; padding-right: 12px; }
+  table.wbs td.status span { min-width: 44px; }
+}
+
+/* ---- 指定フォームと日程表を横に並べられない幅 ---- */
+@media (max-width: 760px) {
+  /* 本体: 1 列にして、タブで選んだほうだけ見せる */
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 12px 12px; }
+  .layout.pane-form .preview { display: none; }
+  .layout.pane-preview .form { display: none; }
+  .panel { border-radius: 0 0 8px 8px; }
+
+  /* 入力欄: iOS が勝手に拡大しないよう 16px 以上にする */
+  .form { padding: 4px 14px 20px; }
+  .form input:not([type=checkbox]):not([type=radio]), .form select, .form textarea {
+    font-size: 16px; padding: 9px 10px;
+  }
+  .form label.check, .radio { min-height: 34px; }
+  .form input[type=checkbox], .form input[type=radio] { width: 18px; height: 18px; }
+  .weekdays button { padding: 10px 0; }
+  .period-mode { gap: 18px; }
+}
+
+/* 横に寝かせた狭い画面では、高さを稼ぐために上のバーを詰める */
+@media (max-width: 900px) and (max-height: 480px) {
+  .topbar { padding: 6px 12px; }
+  .pane-tabs { padding-top: 4px; }
+  .pane-tab { min-height: 34px; }
+}
