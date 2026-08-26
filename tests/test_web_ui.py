@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import D
+
 pytest.importorskip("fastapi", reason="Web アプリの依存が必要")
 sync_playwright = pytest.importorskip(
     "playwright.sync_api", reason="playwright が必要"
@@ -349,6 +351,33 @@ def test_downloading_in_english(page, tmp_path):
     assert openpyxl.load_workbook(saved).sheetnames == ["Schedule", "Members", "Settings"]
     _set_language(page, "ja")
     assert page.errors == []
+
+
+def test_the_indent_in_a_task_name_is_shown(page, make_filled):
+    """項目名の字下げを画面でもそのまま見せる (HTML は空白を詰めるため)。"""
+    book = make_filled("indent-ui.xlsx", rows=[
+        ("開発", "", "1", "テスト実施", D(2026, 4, 1), 10, D(2026, 4, 14),
+         None, None, None, None, None, "", "設計", ""),
+        ("", "", "2", "\u3000WEB口座開設システム", D(2026, 4, 1), 10, D(2026, 4, 14),
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    page.set_input_files("#import-file", str(book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+    names = page.eval_on_selector_all(
+        "table.wbs tbody td.name", "n => n.map(x => x.textContent)")
+    assert names[:2] == ["テスト実施", "\u3000WEB口座開設システム"]
+    # 詰められていないこと (字下げが見た目にも残る)
+    lefts = page.eval_on_selector_all(
+        "table.wbs tbody td.name",
+        "n => n.slice(0, 2).map(x => x.getBoundingClientRect().left)")
+    assert lefts[0] == lefts[1]              # セル自体は同じ位置
+    assert page.eval_on_selector(
+        "table.wbs tbody td.name",
+        "n => getComputedStyle(n).whiteSpace") == "pre"
+    assert page.errors == []
+
 
 
 # ------------------------------------------------ スマートフォン (狭い画面)

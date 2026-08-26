@@ -391,6 +391,45 @@ def test_the_working_calendar_is_used_for_counting(make_filled):
     assert read(make_filled("w2.xlsx", rows=rows, workdays=weekdays)).rows[0].days == 12
 
 
+# ---------------------------------------------------------------- 項目名の空白
+def test_the_indent_in_a_task_name_is_kept(make_filled):
+    """項目名の行頭の空白 (階層を表す字下げ) をそのまま読む。"""
+    path = make_filled("indent.xlsx", rows=[
+        ("開発", "", "1", "テスト実施", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), None, None, None, None, None, "", "設計", ""),
+        ("", "", "2", "\u3000WEB口座開設システム_画像管理", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), None, None, None, None, None, "", "設計", ""),
+        ("", "", "3", "  半角スペースでも同じ", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), None, None, None, None, None, "", "設計", ""),
+    ])
+    names = [r.name for r in read(path, base_date=BASE).rows]
+    assert names == ["テスト実施", "\u3000WEB口座開設システム_画像管理",
+                     "  半角スペースでも同じ"]
+
+
+def test_a_name_of_only_spaces_is_still_empty(make_filled):
+    """空白だけの項目名は、これまでどおり空として扱う。"""
+    path = make_filled("spaces.xlsx", rows=[
+        ("開発", "", "1", "\u3000\u3000  ", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), None, None, None, None, None, "", "設計", ""),
+    ])
+    assert read(path, base_date=BASE).rows[0].name == ""
+
+
+def test_the_indent_survives_a_round_trip(make_filled, tmp_path):
+    """書き出した Excel にも字下げが残る。"""
+    from wbsgen.workbook import export
+
+    path = make_filled("indent2.xlsx", rows=[
+        ("開発", "", "1", "\u3000字下げした項目", dt.date(2026, 4, 1), 10,
+         dt.date(2026, 4, 14), None, None, None, None, None, "", "設計", ""),
+    ])
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    assert openpyxl.load_workbook(out)[SHEET_PLAN]["E5"].value == "\u3000字下げした項目"
+    assert read(out, base_date=BASE).rows[0].name == "\u3000字下げした項目"
+
+
 # ------------------------------------------------- 実績の終了日は必ず完了にする
 def _write_plain_number(path, cell, value):
     """書式を「標準」にしたうえで数値を入れる (日付書式が付いていない状態)。"""

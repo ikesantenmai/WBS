@@ -202,6 +202,11 @@ Because these sheets are filled in by hand, the following are also accepted.
 - Days as `10`, `10日`, `10 days`, `10d`
 - Progress as `0.8`, `80%`, `80`
 
+**Indentation in a task name is kept.** Names are often indented with leading
+spaces (full-width or ASCII) to show the hierarchy, so no whitespace is
+trimmed: the name reaches the screen and the exported Excel exactly as it was
+written. A cell holding only spaces still counts as empty.
+
 **Vertically merged cells are read too.** Excel keeps a merged cell's value
 only in its top-left cell, but shows it across the whole range, so the rows
 below read the same value (dates and group names are often merged this way).

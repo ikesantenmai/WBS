@@ -516,7 +516,7 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
         }
 
         row = Row(row=index)
-        row.name = _text(raw.get("name"))
+        row.name = _name_text(raw.get("name"))
         # 大項目・中項目は書かれた行だけに入るので、下の行へ引き継ぐ
         group = _text(raw.get("group")) or group
         subgroup = _text(raw.get("subgroup")) or subgroup
@@ -714,6 +714,21 @@ def _text(value) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value).strip()
+
+
+def _name_text(value) -> str:
+    """項目名。書かれた空白をそのまま残す。
+
+    「　WEB口座開設システム」のように、行頭の空白で階層を表す書き方が
+    あるため、前後の空白を落とさずに読む (落とすと字下げが消えてしまう)。
+    空白だけのセルは、これまでどおり空として扱う。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value)
+    return text if text.strip() else ""
 
 
 #: 受け付ける日付の書き方

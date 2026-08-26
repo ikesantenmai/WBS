@@ -180,7 +180,8 @@ table.wbs th.axis { background: var(--band); color: #4a4a2c; }
 table.wbs th.axis.rest { background: var(--holiday); color: var(--danger); }
 table.wbs th.axis.saturday { background: var(--saturday); color: #0070c0; }
 table.wbs td.plan { background: var(--plan-cell); color: var(--plan-ink); }
-table.wbs td.name { text-align: left; }
+/* 項目名は行頭の空白で階層を表すことがあるので、そのまま見せる */
+table.wbs td.name { text-align: left; white-space: pre; }
 table.wbs td.group, table.wbs td.subgroup, table.wbs td.member { text-align: left; }
 table.wbs td.status span {
   display: inline-block; min-width: 52px; padding: 0 4px;
