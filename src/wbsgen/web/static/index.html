@@ -22,6 +22,11 @@
   <button id="btn-build" class="btn primary" type="button" data-i18n="download"></button>
 </header>
 
+<div id="busy" class="busy" role="status" aria-live="polite" hidden>
+  <span class="spinner" aria-hidden="true"></span>
+  <span id="busy-text"></span>
+</div>
+
 <div id="banner" class="banner" role="alert" hidden></div>
 
 <!-- 狭い画面では「指定」と「プレビュー」を切り替えて使う -->

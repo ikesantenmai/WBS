@@ -154,6 +154,12 @@ The period, sheet and working-day settings are on the left; a preview with
 calendar is built by exactly the same code as the command line, so you can
 check it before downloading.
 
+### While it is working
+
+Importing and exporting take a moment, so a line at the top says what is
+happening ("Reading sbi.xlsx…", "Building the Excel file with the Gantt
+chart…"). The buttons are held while it runs, so nothing starts twice.
+
 ### On a phone
 
 The layout follows the width of the screen. It is the **same URL** — there is

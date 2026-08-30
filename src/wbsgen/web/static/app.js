@@ -113,6 +113,9 @@ const UI = {
     derived_actual_end: '実績日数から補った終了日',
     derived_progress: '実績の終了日が入っているので 100%',
     imported: '{name} を読み込みました。',
+    busy_import: '{name} を読み込んでいます…',
+    busy_build: 'Excel を作っています…',
+    busy_export: 'ガントチャート付きの Excel を作っています…',
     saved: '{name} を書き出しました。',
     cannot_import: '読み込めません: {reason}',
     cannot_save: '書き出せません: {reason}',
@@ -188,6 +191,9 @@ const UI = {
     derived_actual_end: 'End date derived from the actual number of days',
     derived_progress: '100% because an actual end date is filled in',
     imported: 'Imported {name}.',
+    busy_import: 'Reading {name}…',
+    busy_build: 'Building the Excel file…',
+    busy_export: 'Building the Excel file with the Gantt chart…',
     saved: 'Saved {name}.',
     cannot_import: 'Cannot import: {reason}',
     cannot_save: 'Cannot save: {reason}',
@@ -232,6 +238,7 @@ let importToken = 0;       // 読み込みの通し番号 (古い応答を捨て
 let pane = 'form';         // 狭い画面でどちらを見せているか ('form' / 'preview')
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
 let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
+let busyCount = 0;         // 進行中の読み込み・書き出しの数
 let suggestedTitle = '';   // 提案したプロジェクト名 (書き換えられたか判る)
 
 const $ = (sel) => document.querySelector(sel);
@@ -262,6 +269,28 @@ function banner(message, ok = false) {
   box.className = ok ? 'banner ok' : 'banner';
   box.hidden = false;
   if (ok) setTimeout(() => { if (box.textContent === message) banner(''); }, 3500);
+}
+
+// ------------------------------------------------------------ 処理中の表示
+/**
+ * 読み込み・書き出しの間、何をしているかを出して二重の操作を止める。
+ * 必ず :func:`endBusy` と対にして呼ぶこと。
+ */
+function startBusy(key, params) {
+  busyCount += 1;
+  $('#busy-text').textContent = t(key, params);
+  $('#busy').hidden = false;
+  applyBusy();
+}
+
+function endBusy() {
+  busyCount = Math.max(0, busyCount - 1);
+  if (busyCount === 0) $('#busy').hidden = true;
+  applyBusy();
+}
+
+function applyBusy() {
+  document.body.classList.toggle('is-busy', busyCount > 0);
 }
 
 async function api(path, options = {}) {
@@ -692,6 +721,7 @@ async function importFile(file, unit = null) {
   body.append('file', file);
   const query = unit ? `&unit=${encodeURIComponent(unit)}` : '';
   const token = ++importToken;
+  startBusy('busy_import', { name: file.name });
   try {
     const response = await api(`/api/import?lang=${language}${query}`,
                                { method: 'POST', body });
@@ -718,6 +748,8 @@ async function importFile(file, unit = null) {
   } catch (error) {
     if (token !== importToken) return;
     banner(t('cannot_import', { reason: error.message }));
+  } finally {
+    endBusy();
   }
 }
 
@@ -909,7 +941,7 @@ function bind() {
 
 /** 空の WBS を書き出す。 */
 function download() {
-  return save($('#btn-build'), `/api/build?lang=${language}`, {
+  return save($('#btn-build'), 'busy_build', `/api/build?lang=${language}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(currentSpec()),
@@ -922,13 +954,14 @@ function exportChart() {
   const body = new FormData();
   body.append('file', loadedFile);
   const unit = $('#chart-unit').value;
-  return save($('#btn-export'),
+  return save($('#btn-export'), 'busy_export',
               `/api/export?lang=${language}&unit=${encodeURIComponent(unit)}`,
               { method: 'POST', body });
 }
 
-async function save(button, path, options) {
+async function save(button, busyKey, path, options) {
   button.disabled = true;
+  startBusy(busyKey);
   try {
     const response = await api(path, options);
     const blob = await response.blob();
@@ -946,6 +979,7 @@ async function save(button, path, options) {
     banner(t('cannot_save', { reason: error.message }));
   } finally {
     button.disabled = false;
+    endBusy();
   }
 }
 

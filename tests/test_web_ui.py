@@ -380,6 +380,70 @@ def test_the_indent_in_a_task_name_is_shown(page, make_filled):
 
 
 
+# ---------------------------------------------------------------- 処理中の表示
+def _slow(page, pattern, seconds=1.0):
+    """指定した通信をわざと遅くして、処理中の表示を見られるようにする。"""
+    def handler(route):
+        time.sleep(seconds)
+        route.continue_()
+    page.route(pattern, handler)
+    return lambda: page.unroute(pattern, handler)
+
+
+def test_importing_shows_what_is_happening(page, filled_book):
+    stop = _slow(page, "**/api/import*")
+    try:
+        page.set_input_files("#import-file", str(filled_book))
+        page.wait_for_selector("#busy:not([hidden])")
+        assert "読み込んでいます" in page.text_content("#busy")
+        assert filled_book.name in page.text_content("#busy")
+        assert page.is_visible(".spinner")
+        # 処理中はボタンを押せない
+        assert page.eval_on_selector(
+            "#btn-export", "n => getComputedStyle(n).pointerEvents") == "none"
+    finally:
+        stop()
+
+    page.wait_for_selector("#busy", state="hidden")
+    assert not page.evaluate("document.body.classList.contains('is-busy')")
+    assert page.errors == []
+
+
+def test_exporting_shows_what_is_happening(page, filled_book):
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+    stop = _slow(page, "**/api/export*")
+    try:
+        with page.expect_download():
+            page.click("#btn-export")
+            page.wait_for_selector("#busy:not([hidden])")
+            assert "書き出しています" in page.text_content("#busy") \
+                or "作っています" in page.text_content("#busy")
+    finally:
+        stop()
+
+    page.wait_for_selector("#busy", state="hidden")
+    assert page.errors == []
+
+
+def test_building_a_blank_wbs_shows_what_is_happening(page):
+    _reset(page)
+    stop = _slow(page, "**/api/build*")
+    try:
+        with page.expect_download():
+            page.click("#btn-build")
+            page.wait_for_selector("#busy:not([hidden])")
+            assert "作っています" in page.text_content("#busy")
+    finally:
+        stop()
+
+    page.wait_for_selector("#busy", state="hidden")
+    assert page.errors == []
+
+
+
 # ------------------------------------------------ スマートフォン (狭い画面)
 def _phone_reset(phone):
     """新規作成の指定タブに戻す。"""

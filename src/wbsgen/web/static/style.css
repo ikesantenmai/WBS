@@ -73,6 +73,29 @@ body { display: flex; flex-direction: column; }
 }
 .banner.ok { background: #eaf6ec; color: #205c2b; border-bottom-color: #bfe0c6; }
 
+/* ---------------- 処理中 ---------------- */
+.busy {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 18px; font-size: 13px;
+  background: #eef4fd; color: #234a80; border-bottom: 1px solid #cfdff5;
+}
+.spinner {
+  flex: none; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid #bcd2ee; border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 処理中は二重に押せないようにする (無効の状態は元の指定を触らずに見せる) */
+body.is-busy { cursor: progress; }
+body.is-busy .topbar .btn,
+body.is-busy #chart-unit { pointer-events: none; opacity: .5; }
+
+/* 動きを控える設定のときは、ゆっくり回す */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+}
+
 /* ---------------- layout ---------------- */
 .layout {
   display: grid; grid-template-columns: 320px minmax(0, 1fr);
