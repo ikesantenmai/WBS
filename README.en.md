@@ -208,6 +208,16 @@ Because these sheets are filled in by hand, the following are also accepted.
 - Days as `10`, `10日`, `10 days`, `10d`
 - Progress as `0.8`, `80%`, `80`
 
+**Extra sheets are carried through.** Any sheet other than Schedule, Members
+and Settings (notes, an issue list, a cover page) is left unread and **copied
+straight into the exported file**, keeping values, formulas, styles, merged
+cells, column widths, row heights and frozen panes (charts and images cannot be
+carried). The schedule stays the first sheet, so the Gantt shapes land where
+they should.
+
+**A renamed schedule sheet is still found.** If none of the known sheet names
+match, the first sheet with a Task column is used.
+
 **Indentation in a task name is kept.** Names are often indented with leading
 spaces (full-width or ASCII) to show the hierarchy, so no whitespace is
 trimmed: the name reaches the screen and the exported Excel exactly as it was

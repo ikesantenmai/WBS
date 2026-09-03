@@ -154,6 +154,8 @@ class ImportedWBS:
     rows: List[Row] = field(default_factory=list)
     #: 読めなかったセルの説明 (画面に出して知らせる)
     warnings: List[str] = field(default_factory=list)
+    #: このツールが使わないシート。中身は見ずに、書き出しへそのまま引き継ぐ。
+    extra_sheets: List[Any] = field(default_factory=list)
 
 
 # ----------------------------------------------------------------------
@@ -170,10 +172,7 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     except Exception as exc:  # noqa: BLE001 - openpyxl の例外は多岐にわたる
         raise SpecError(message(lang, "not_excel", reason=exc))
 
-    sheet = _pick_sheet(book, PLAN_SHEETS)
-    header_row, columns = _find_headers(sheet, lang)
-    if "name" not in columns:
-        raise SpecError(message(lang, "no_task_column"))
+    sheet, header_row, columns = _pick_plan_sheet(book, lang)
 
     config = _read_config(book)
     first_row = header_row + (2 if config.get("unit") == UNIT_DAY else 1)
@@ -186,7 +185,8 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     resolve(rows, spec.calendar(), base_date, lang)
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
-    return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings)
+    return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
+                       extra_sheets=_extra_sheets(source, book, sheet.title))
 
 
 #: 導出のたびに書かれた値へ戻す項目
@@ -406,6 +406,48 @@ def _pick_sheet(book, names):
         if name in names:
             return book[name]
     return book.worksheets[0]
+
+
+def _pick_plan_sheet(book, language: str):
+    """日程表のシートと、その見出しの位置を決める。
+
+    まず決まったシート名で探す。名前を変えてあるファイルもあるので、
+    見つからなければ「項目」の列があるシートを上から探す
+    (メモなどのシートが足してあっても、そちらを掴まないように)。
+    """
+    named = [book[name] for name in book.sheetnames if name in PLAN_SHEETS]
+    found_header = False
+    for sheet in named or book.worksheets:
+        try:
+            header_row, columns = _find_headers(sheet, language)
+        except SpecError:
+            continue        # 見出しの無いシート (メモや表紙など) は飛ばす
+        found_header = True
+        if "name" in columns:
+            return sheet, header_row, columns
+    # 見出しらしい行がどこにも無いのか、あっても「項目」が無いのかで分ける
+    raise SpecError(message(language,
+                            "no_task_column" if found_header else "no_header"))
+
+
+def _extra_sheets(source, book, plan_title: str):
+    """このツールが使わないシートを、書き出しへ引き継ぐために読み直す。
+
+    値だけでなく数式や書式も残したいので、計算結果ではなく数式が入る
+    読み方でもう一度開く。開けなければ諦める (診断ではないので黙って)。
+    """
+    known = PLAN_SHEETS | CONFIG_SHEETS | MEMBER_SHEETS
+    names = [name for name in book.sheetnames
+             if name != plan_title and name not in known]
+    if not names:
+        return []
+    try:
+        if hasattr(source, "seek"):
+            source.seek(0)
+        formulas = load_workbook(source, data_only=False, read_only=False)
+    except Exception:  # noqa: BLE001 - 引き継げなくても読み込みは続ける
+        return [book[name] for name in names]
+    return [formulas[name] for name in names if name in formulas.sheetnames]
 
 
 # ----------------------------------------------------------------------

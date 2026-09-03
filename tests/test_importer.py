@@ -392,6 +392,96 @@ def test_the_working_calendar_is_used_for_counting(make_filled):
     assert read(make_filled("w2.xlsx", rows=rows, workdays=weekdays)).rows[0].days == 12
 
 
+# ---------------------------------------------------------------- 足したシート
+def _add_sheet(path, title, at=None, fill=None):
+    book = openpyxl.load_workbook(path)
+    sheet = book.create_sheet(title) if at is None else book.create_sheet(title, at)
+    if fill:
+        fill(sheet)
+    book.save(path)
+    return path
+
+
+def test_an_extra_sheet_does_not_disturb_reading(make_filled):
+    """足したシートがあっても、日程表はこれまでどおり読める。"""
+    path = _add_sheet(make_filled("extra.xlsx"), "メモ", at=0,
+                      fill=lambda s: s.__setitem__("A1", "打合せメモ"))
+    imported = read(path, base_date=BASE)
+    assert [r.name for r in imported.rows][:2] == ["要件定義", "基本設計"]
+    assert [s.title for s in imported.extra_sheets] == ["メモ"]
+
+
+def test_an_extra_sheet_is_written_out_again(make_filled, tmp_path):
+    """足したシートは、書き出したファイルにもそのまま残る。"""
+    from wbsgen.workbook import export
+
+    def fill(sheet):
+        sheet["A1"] = "課題一覧"
+        sheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
+        sheet["A1"].fill = openpyxl.styles.PatternFill("solid", fgColor="FFFF00")
+        sheet.merge_cells("A1:C1")
+        sheet["B2"] = "=COUNTA(A4:A100)"
+        sheet["A4"] = dt.date(2026, 8, 20)
+        sheet["A4"].number_format = "yyyy/mm/dd"
+        sheet.column_dimensions["A"].width = 28
+        sheet.freeze_panes = "A4"
+
+    path = _add_sheet(make_filled("extra2.xlsx"), "課題管理", fill=fill)
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    book = openpyxl.load_workbook(out)
+    # 日程表は 1 枚目のまま (ガントの図形の差し込み先が 1 枚目のため)
+    assert book.sheetnames == [SHEET_PLAN, "担当者一覧", "設定", "課題管理"]
+    sheet = book["課題管理"]
+    assert sheet["A1"].value == "課題一覧"
+    assert sheet["A1"].font.b and sheet["A1"].font.sz == 14
+    assert sheet["A1"].fill.fgColor.rgb.endswith("FFFF00")
+    assert [str(r) for r in sheet.merged_cells.ranges] == ["A1:C1"]
+    assert sheet["B2"].value == "=COUNTA(A4:A100)"      # 数式のまま残る
+    assert sheet["A4"].number_format == "yyyy/mm/dd"
+    assert sheet.column_dimensions["A"].width == 28
+    assert sheet.freeze_panes == "A4"
+
+
+def test_the_gantt_shapes_still_land_on_the_schedule_sheet(make_filled, tmp_path):
+    """シートが増えても、図形は日程表のシートに入る。"""
+    import zipfile
+
+    from wbsgen.workbook import export
+
+    path = _add_sheet(make_filled("extra3.xlsx"), "メモ", at=0,
+                      fill=lambda s: s.__setitem__("A1", "x"))
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    with zipfile.ZipFile(out) as archive:
+        assert "xl/drawings/drawing1.xml" in archive.namelist()
+        assert "<drawing" in archive.read("xl/worksheets/sheet1.xml").decode()
+
+
+def test_a_renamed_schedule_sheet_is_still_found(make_filled):
+    """日程表のシート名を変えてあっても、「項目」の列で見つける。"""
+    path = make_filled("renamed.xlsx")
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN].title = "ITb 工程表"
+    cover = book.create_sheet("表紙", 0)
+    cover["A1"] = "外部結合テスト"
+    book.save(path)
+
+    imported = read(path, base_date=BASE)
+    assert [r.name for r in imported.rows][:1] == ["要件定義"]
+    assert [s.title for s in imported.extra_sheets] == ["表紙"]
+
+
+def test_a_file_with_no_schedule_sheet_is_still_rejected(tmp_path):
+    book = openpyxl.Workbook()
+    book.active["A1"] = "表紙"
+    book.create_sheet("メモ")["A1"] = "なにか"
+    path = tmp_path / "no-plan.xlsx"
+    book.save(path)
+    with pytest.raises(SpecError, match="見出し行が見つかりません"):
+        read(path)
+
+
 # ---------------------------------------------------------------- 項目名の空白
 def test_the_indent_in_a_task_name_is_kept(make_filled):
     """項目名の行頭の空白 (階層を表す字下げ) をそのまま読む。"""
