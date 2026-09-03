@@ -229,11 +229,14 @@ const HEAD_H = 24;
 //: 空行のプレビューはこれ以上描いても読めないので省略する
 const PREVIEW_ROW_LIMIT = 60;
 
+//: 保存用の URL を残しておく時間 (これより早く捨てると保存できない端末がある)
+const SAVE_KEEP_MS = 60000;
+
 let meta = null;
 let workdays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 let mode = 'blank';        // 'blank' = 新規作成 / 'chart' = 読み込んだ WBS
 let pending = null;
-let loadedFile = null;     // 読み込み中のファイル (単位を変えて読み直すため)
+let loaded = null;         // 読み込んだファイルの名前と中身 ({ name, bytes })
 let importToken = 0;       // 読み込みの通し番号 (古い応答を捨てるため)
 let pane = 'form';         // 狭い画面でどちらを見せているか ('form' / 'preview')
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
@@ -716,19 +719,33 @@ function renderTotals(totals) {
 }
 
 // ---------------------------------------------------------------- 読み込み
-async function importFile(file, unit = null) {
+async function importFile(file) {
+  let bytes;
+  try {
+    // 端末によっては、選んだファイルの参照が後で使えなくなる。
+    // 中身をここで読み切って持っておき、書き出しにもこれを使う。
+    bytes = await file.arrayBuffer();
+  } catch (error) {
+    banner(t('cannot_import', { reason: error.message }));
+    return;
+  }
+  return importBytes(file.name, bytes);
+}
+
+/** 持っている中身を送って読み込む (表示単位を変えたときは読み直す)。 */
+async function importBytes(name, bytes, unit = null) {
   const body = new FormData();
-  body.append('file', file);
+  body.append('file', new Blob([bytes]), name);
   const query = unit ? `&unit=${encodeURIComponent(unit)}` : '';
   const token = ++importToken;
-  startBusy('busy_import', { name: file.name });
+  startBusy('busy_import', { name });
   try {
     const response = await api(`/api/import?lang=${language}${query}`,
                                { method: 'POST', body });
     const model = await response.json();
     // 待っている間に「戻る」や別の読み込みが起きていたら、この結果は捨てる
     if (token !== importToken) return;
-    loadedFile = file;
+    loaded = { name, bytes };
     setMode('chart');
     $('#chart-unit').value = model.timeline.unit;
     render({
@@ -744,7 +761,7 @@ async function importFile(file, unit = null) {
         columns: model.timeline.columns.length, rows: model.rows.length,
       }),
     });
-    if (!unit) banner(t('imported', { name: file.name }), true);
+    if (!unit) banner(t('imported', { name }), true);
   } catch (error) {
     if (token !== importToken) return;
     banner(t('cannot_import', { reason: error.message }));
@@ -843,7 +860,9 @@ async function switchLanguage(value) {
   suggestedTitle = meta.suggested.title;
   $('#title').placeholder = suggestedTitle;
 
-  if (mode === 'chart' && loadedFile) await importFile(loadedFile, $('#chart-unit').value);
+  if (mode === 'chart' && loaded) {
+    await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value);
+  }
   else await refresh();
 }
 
@@ -912,13 +931,13 @@ function bind() {
   $('#btn-export').addEventListener('click', exportChart);
   $('#btn-back').addEventListener('click', () => {
     importToken += 1;   // 読み込み中なら、その結果は捨てる
-    loadedFile = null;
+    loaded = null;
     setMode('blank');
     banner('');
     refresh();
   });
   $('#chart-unit').addEventListener('change', () => {
-    if (loadedFile) importFile(loadedFile, $('#chart-unit').value);
+    if (loaded) importBytes(loaded.name, loaded.bytes, $('#chart-unit').value);
   });
   $('#import-file').addEventListener('change', (event) => {
     const file = event.target.files[0];
@@ -950,13 +969,27 @@ function download() {
 
 /** 表示中のガントチャートを図形として描き込んだ Excel を書き出す。 */
 function exportChart() {
-  if (!loadedFile) return Promise.resolve();
+  if (!loaded) return Promise.resolve();
   const body = new FormData();
-  body.append('file', loadedFile);
+  body.append('file', new Blob([loaded.bytes]), loaded.name);
   const unit = $('#chart-unit').value;
   return save($('#btn-export'), 'busy_export',
               `/api/export?lang=${language}&unit=${encodeURIComponent(unit)}`,
               { method: 'POST', body });
+}
+
+/**
+ * 受け取った中身をファイルとして保存させる。
+ *
+ * すぐに URL を捨てると、端末によっては保存が始まる前に消えてしまうので、
+ * しばらく残してから片付ける。
+ */
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = el('a', { href: url, download: name, style: 'display:none' });
+  document.body.append(link);
+  link.click();
+  setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, SAVE_KEEP_MS);
 }
 
 async function save(button, busyKey, path, options) {
@@ -968,12 +1001,7 @@ async function save(button, busyKey, path, options) {
     const disposition = response.headers.get('Content-Disposition') || '';
     const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
     const name = match ? decodeURIComponent(match[1]) : 'wbs.xlsx';
-    const url = URL.createObjectURL(blob);
-    const link = el('a', { href: url, download: name });
-    document.body.append(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, name);
     banner(t('saved', { name }), true);
   } catch (error) {
     banner(t('cannot_save', { reason: error.message }));

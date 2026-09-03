@@ -343,6 +343,10 @@ def _missing_column_warnings(columns: Dict[str, int], language: str) -> List[str
     return [message(language, "missing_columns", columns=joined)]
 
 
+#: 数式の知らせは、これだけ出せば充分 (全部並べても読めない)
+MAX_FORMULA_WARNINGS = 20
+
+
 def _formula_warnings(source, sheet_name: str, columns: Dict[str, int],
                       rows: List[Row], language: str) -> List[str]:
     """空に見えるセルが実は数式なら、計算結果が無いことを知らせる。
@@ -350,13 +354,15 @@ def _formula_warnings(source, sheet_name: str, columns: Dict[str, int],
     Excel は数式の計算結果をファイルに残すが、スクリプトなどで作られた
     ファイルには入っていないことがある。そのまま読むと空に見えるので、
     記入したつもりの日付や進捗が反映されない。
+
+    読み取り専用のシートは ``cell()`` を呼ぶたびに先頭から読み直すので、
+    セルごとに引かず、上から 1 回だけ流して必要な行を拾う。
     """
-    blanks = [
-        (row.row, key, columns[key])
-        for row in rows
-        for key in IMPORTANT_COLUMNS
-        if key in columns and getattr(row, key, None) is None
-    ]
+    blanks: Dict[int, List[tuple]] = {}
+    for row in rows:
+        for key in IMPORTANT_COLUMNS:
+            if key in columns and getattr(row, key, None) is None:
+                blanks.setdefault(row.row, []).append((columns[key], key))
     if not blanks:
         return []
 
@@ -365,13 +371,22 @@ def _formula_warnings(source, sheet_name: str, columns: Dict[str, int],
         return []
 
     text = labels(language)
-    out = []
-    for index, key, col in blanks:
-        value = formulas.cell(row=index, column=col).value
-        if isinstance(value, str) and value.startswith("="):
-            out.append(message(language, "cell_formula", row=index,
-                               column=text.columns.get(key, key)))
-    return out[:20]
+    out: List[str] = []
+    first, last = min(blanks), max(blanks)
+    stream = formulas.iter_rows(min_row=first, max_row=last, min_col=1,
+                                values_only=True)
+    for offset, values in enumerate(stream):
+        wanted = blanks.get(first + offset)
+        if not wanted:
+            continue
+        for col, key in wanted:
+            value = values[col - 1] if col <= len(values) else None
+            if isinstance(value, str) and value.startswith("="):
+                out.append(message(language, "cell_formula", row=first + offset,
+                                   column=text.columns.get(key, key)))
+                if len(out) >= MAX_FORMULA_WARNINGS:
+                    return out
+    return out
 
 
 def _formula_sheet(source, sheet_name: str):

@@ -381,28 +381,57 @@ def test_the_indent_in_a_task_name_is_shown(page, make_filled):
 
 
 # ---------------------------------------------------------------- 処理中の表示
-def _slow(page, pattern, seconds=1.0):
-    """指定した通信をわざと遅くして、処理中の表示を見られるようにする。"""
-    def handler(route):
-        time.sleep(seconds)
-        route.continue_()
-    page.route(pattern, handler)
-    return lambda: page.unroute(pattern, handler)
+class _Held:
+    """通信を握って離さないでおく。処理中の画面をゆっくり確かめるため。
+
+    ハンドラの中で待つと Playwright 自体が止まってしまうので、受け取った
+    まま返さずに置いておき、確認が済んでから流す。
+    """
+
+    def __init__(self, page, pattern):
+        self.page, self.pattern, self.routes = page, pattern, []
+        self.handler = lambda route: self.routes.append(route)
+        page.route(pattern, self.handler)
+
+    def wait(self):
+        for _ in range(100):
+            if self.routes:
+                return
+            self.page.wait_for_timeout(50)
+        raise AssertionError(f"{self.pattern} への通信が来ませんでした")
+
+    def release(self):
+        # 先に握っていたぶんを流してから外す (外すと自動で流れてしまうため)
+        for route in self.routes:
+            route.continue_()
+        self.routes = []
+        self.page.unroute(self.pattern, self.handler)
+
+
+def _busy_state(page, button):
+    """処理中の見え方を、ひと呼びでまとめて取る (途中で終わらないように)。"""
+    return page.evaluate("""(id) => ({
+        shown: !document.querySelector('#busy').hidden,
+        text: document.querySelector('#busy-text').textContent,
+        spinner: !!document.querySelector('.spinner'),
+        marked: document.body.classList.contains('is-busy'),
+        locked: getComputedStyle(document.querySelector(id)).pointerEvents === 'none',
+    })""", button)
 
 
 def test_importing_shows_what_is_happening(page, filled_book):
-    stop = _slow(page, "**/api/import*")
+    held = _Held(page, "**/api/import*")
     try:
         page.set_input_files("#import-file", str(filled_book))
-        page.wait_for_selector("#busy:not([hidden])")
-        assert "読み込んでいます" in page.text_content("#busy")
-        assert filled_book.name in page.text_content("#busy")
-        assert page.is_visible(".spinner")
-        # 処理中はボタンを押せない
-        assert page.eval_on_selector(
-            "#btn-export", "n => getComputedStyle(n).pointerEvents") == "none"
+        held.wait()
+        state = _busy_state(page, "#btn-build")
     finally:
-        stop()
+        held.release()
+
+    assert state["shown"] and state["spinner"] and state["marked"]
+    assert "読み込んでいます" in state["text"]
+    assert filled_book.name in state["text"]
+    assert state["locked"]                   # 処理中はボタンを押せない
 
     page.wait_for_selector("#busy", state="hidden")
     assert not page.evaluate("document.body.classList.contains('is-busy')")
@@ -414,34 +443,36 @@ def test_exporting_shows_what_is_happening(page, filled_book):
     page.wait_for_function(
         "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
 
-    stop = _slow(page, "**/api/export*")
-    try:
-        with page.expect_download():
+    held = _Held(page, "**/api/export*")
+    with page.expect_download():
+        try:
             page.click("#btn-export")
-            page.wait_for_selector("#busy:not([hidden])")
-            assert "書き出しています" in page.text_content("#busy") \
-                or "作っています" in page.text_content("#busy")
-    finally:
-        stop()
+            held.wait()
+            state = _busy_state(page, "#btn-export")
+        finally:
+            held.release()
 
+    assert state["shown"] and state["marked"] and state["locked"]
+    assert "ガントチャート" in state["text"]
     page.wait_for_selector("#busy", state="hidden")
     assert page.errors == []
 
 
 def test_building_a_blank_wbs_shows_what_is_happening(page):
     _reset(page)
-    stop = _slow(page, "**/api/build*")
-    try:
-        with page.expect_download():
+    held = _Held(page, "**/api/build*")
+    with page.expect_download():
+        try:
             page.click("#btn-build")
-            page.wait_for_selector("#busy:not([hidden])")
-            assert "作っています" in page.text_content("#busy")
-    finally:
-        stop()
+            held.wait()
+            state = _busy_state(page, "#btn-build")
+        finally:
+            held.release()
 
+    assert state["shown"] and state["marked"] and state["locked"]
+    assert "作っています" in state["text"]
     page.wait_for_selector("#busy", state="hidden")
     assert page.errors == []
-
 
 
 # ------------------------------------------------ スマートフォン (狭い画面)

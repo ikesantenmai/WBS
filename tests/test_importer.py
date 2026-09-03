@@ -1,6 +1,7 @@
 """記入済み Excel の読み込みのテスト。"""
 
 import datetime as dt
+import time
 
 import openpyxl
 import pytest
@@ -694,6 +695,27 @@ def test_a_formula_warning_is_translated(make_filled):
 
     imported = read(path, language="en", base_date=BASE)
     assert any("formula" in w for w in imported.warnings), imported.warnings
+
+
+def test_reading_a_large_sheet_stays_quick(make_filled):
+    """行数が増えても読み込みが重くならないこと。
+
+    数式の確認でセルを 1 つずつ引くと、読み取り専用のシートは毎回
+    先頭から読み直すため、行数の二乗で遅くなる (実測で 90 行 4 秒)。
+    """
+    rows = [
+        ("開発", "", str(i), f"作業 {i}", dt.date(2026, 4, 1), None, None,
+         None, None, None, None, None, "", "設計", "")
+        for i in range(400)
+    ]
+    path = make_filled("big.xlsx", rows=rows)
+
+    started = time.perf_counter()
+    imported = read(path, base_date=BASE)
+    elapsed = time.perf_counter() - started
+
+    assert len(imported.rows) == 400
+    assert elapsed < 5.0, f"読み込みに {elapsed:.1f} 秒かかりました"
 
 
 # ---------------------------------------------------------------- 列が無い表
