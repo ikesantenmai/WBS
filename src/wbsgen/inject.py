@@ -9,6 +9,10 @@ import re
 import shutil
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
+
+NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 CT_DRAWING = "application/vnd.openxmlformats-officedocument.drawing+xml"
 REL_DRAWING = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
@@ -38,6 +42,34 @@ def inject_drawing(path: Path, sheet_part: str, drawing_xml: str) -> None:
         for name, data in contents.items():
             zout.writestr(name, data)
     shutil.move(str(tmp), str(path))
+
+
+def sheet_part(path: Path, title: str) -> str:
+    """``title`` のシートが入っているパートの名前を返す。
+
+    openpyxl はシートを並び順に ``sheet1.xml`` から書き出すが、元の
+    ファイルに継ぎ足した場合は番号が並び順と一致しない。保存した
+    ファイルの ``workbook.xml`` から引き当てる。
+    """
+    with zipfile.ZipFile(path) as archive:
+        book = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+        rels = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+
+    rel_id = None
+    for sheet in book.iter(f"{{{NS_MAIN}}}sheet"):
+        if sheet.get("name") == title:
+            rel_id = sheet.get(f"{{{NS_REL}}}id")
+            break
+    if rel_id is None:
+        raise KeyError(title)
+
+    for relationship in rels:
+        if relationship.get("Id") == rel_id:
+            # Target は "/xl/worksheets/sheet1.xml" とも
+            # "worksheets/sheet1.xml" とも書かれる (書き手による)
+            target = relationship.get("Target", "").lstrip("/")
+            return target if target.startswith("xl/") else f"xl/{target}"
+    raise KeyError(rel_id)
 
 
 # ----------------------------------------------------------------------

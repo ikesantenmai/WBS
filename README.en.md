@@ -208,12 +208,13 @@ Because these sheets are filled in by hand, the following are also accepted.
 - Days as `10`, `10日`, `10 days`, `10d`
 - Progress as `0.8`, `80%`, `80`
 
-**Extra sheets are carried through.** Any sheet other than Schedule, Members
-and Settings (notes, an issue list, a cover page) is left unread and **copied
-straight into the exported file**, keeping values, formulas, styles, merged
-cells, column widths, row heights and frozen panes (charts and images cannot be
-carried). The schedule stays the first sheet, so the Gantt shapes land where
-they should.
+**Extra sheets are carried through untouched.** Any sheet other than Schedule,
+Members and Settings (notes, an issue list, a cover page) is never read. The
+export does not build a new file: it **starts from the original and replaces
+only those three sheets**, so the sheets you added are left exactly as they
+were — charts, images, conditional formatting, data validation, autofilters,
+comments, print areas and tab colours included. The sheet order is preserved
+too (the Gantt shapes find the schedule sheet wherever it sits).
 
 **A renamed schedule sheet is still found.** If none of the known sheet names
 match, the first sheet with a Task column is used.

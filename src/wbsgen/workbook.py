@@ -1,7 +1,10 @@
 """Excel の書き出し。
 
 「スケジュール」「担当者一覧」「設定」の 3 シートを作る。
-読み込んだファイルに他のシートが足してあれば、そのまま後ろに写す。
+
+読み込んだファイルに他のシートが足してあるときは、新しく作らず
+**元のファイルを土台にして 3 シートだけを差し替える**。足したシートには
+一切手を触れないので、そのまま書き出される。
 
 - :func:`write`  … 記入用の空行だけの WBS (中身なし)
 - :func:`export` … 読み込んだ WBS を、ガントチャートの図形つきで書き出す
@@ -13,20 +16,19 @@
 from __future__ import annotations
 
 import datetime as _dt
-from copy import copy
+import io
 from pathlib import Path
 from typing import Dict
 
-from openpyxl import Workbook
-from openpyxl.cell.cell import MergedCell
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import style
 from .blank import BlankWBS
 from .drawing import Drawing, Geometry, Shape
-from .i18n import Labels, labels as get_labels, status_kind
-from .inject import inject_drawing
+from .i18n import LABELS, Labels, labels as get_labels, status_kind
+from .inject import inject_drawing, sheet_part
 from .timeline import UNIT_DAY, Timeline
 
 #: 既定 (日本語) のシート名。英語版では :class:`~wbsgen.i18n.Labels` の値を使う。
@@ -103,58 +105,21 @@ def export(imported, path, base_date=None) -> Path:
     day = base_date or _dt.date.today()
     # 状態と遅れは基準日で決まるので、この日付で数え直してから書く
     resolve(imported.rows, spec.calendar(), day, spec.language)
-    return _Writer(spec, rows=imported.rows, base_date=day,
-                   extra_sheets=imported.extra_sheets).save(path)
+    return _Writer(spec, rows=imported.rows, base_date=day).save(
+        path, source=imported.source, plan_sheet=imported.plan_sheet)
 
 
-def _copy_sheet(source: Worksheet, target: Worksheet) -> None:
-    """このツールが使わないシートを、書式ごと写す。
-
-    openpyxl はシートを本の間で移せないので、値・数式・書式・結合・
-    幅と高さを 1 つずつ写す。グラフや画像は openpyxl が持って来られない
-    ため引き継げない。
-    """
-    for row in source.iter_rows():
-        for cell in row:
-            # 結合した範囲の左上以外は値を持てない (書こうとすると失敗する)
-            if isinstance(cell, MergedCell):
-                continue
-            new = target.cell(row=cell.row, column=cell.column, value=cell.value)
-            if cell.has_style:
-                new.font = copy(cell.font)
-                new.fill = copy(cell.fill)
-                new.border = copy(cell.border)
-                new.alignment = copy(cell.alignment)
-                new.protection = copy(cell.protection)
-                new.number_format = cell.number_format
-            if cell.hyperlink is not None:
-                new.hyperlink = copy(cell.hyperlink)
-            if cell.comment is not None:
-                new.comment = copy(cell.comment)
-
-    for merged in list(source.merged_cells.ranges):
-        target.merge_cells(str(merged))
-    for key, dimension in source.column_dimensions.items():
-        target.column_dimensions[key].width = dimension.width
-        target.column_dimensions[key].hidden = dimension.hidden
-    for key, dimension in source.row_dimensions.items():
-        target.row_dimensions[key].height = dimension.height
-        target.row_dimensions[key].hidden = dimension.hidden
-
-    target.freeze_panes = source.freeze_panes
-    target.sheet_view.showGridLines = source.sheet_view.showGridLines
-    target.sheet_state = source.sheet_state
-    if source.sheet_properties.tabColor:
-        target.sheet_properties.tabColor = copy(source.sheet_properties.tabColor)
+#: このツールが作る (= 書き出しで差し替える) シート名。言語ぶんすべて。
+KNOWN_SHEETS = ({text.sheet_plan for text in LABELS.values()}
+                | {text.sheet_member for text in LABELS.values()}
+                | {text.sheet_config for text in LABELS.values()})
 
 
 class _Writer:
-    def __init__(self, spec: BlankWBS, rows=None, base_date=None,
-                 extra_sheets=None):
+    def __init__(self, spec: BlankWBS, rows=None, base_date=None):
         self.spec = spec
         self.labels: Labels = get_labels(spec.language)
         self.rows = list(rows or [])
-        self.extra_sheets = list(extra_sheets or [])
         self.base_date = base_date or _dt.date.today()
         self.calendar = spec.calendar()
         self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
@@ -166,26 +131,54 @@ class _Writer:
         self._colors = self._member_colors()
 
     # ------------------------------------------------------------------
-    def save(self, path) -> Path:
+    def save(self, path, source: bytes = None, plan_sheet: str = "") -> Path:
+        """``source`` があれば、その中身を土台にして 3 シートだけ差し替える。
+
+        足してあるシートには触れないので、グラフや画像を含めてそのまま
+        書き出される。``source`` が無ければ、これまでどおり新しく作る。
+        ``plan_sheet`` は日程表として読んだシートの名前 (名前を変えて
+        あっても、作り直すぶんが二重にならないように消す)。
+        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        workbook = Workbook()
-        plan = workbook.active
-        plan.title = self.labels.sheet_plan
+        workbook = self._base(source)
+        at = self._clear_known(workbook, plan_sheet)
+        plan = workbook.create_sheet(self.labels.sheet_plan, at)
         self._plan_sheet(plan)
-        self._member_sheet(workbook.create_sheet(self.labels.sheet_member))
-        self._config_sheet(workbook.create_sheet(self.labels.sheet_config))
-        # 読み込んだファイルに足してあったシートを、後ろにそのまま写す。
-        # 日程表は 1 枚目のままにしておく (図形の差し込み先が sheet1 のため)。
-        for source in self.extra_sheets:
-            _copy_sheet(source, workbook.create_sheet(source.title))
+        self._member_sheet(workbook.create_sheet(self.labels.sheet_member, at + 1))
+        self._config_sheet(workbook.create_sheet(self.labels.sheet_config, at + 2))
         workbook.save(path)
 
         drawing = self._gantt()
         if len(drawing):
-            inject_drawing(path, "xl/worksheets/sheet1.xml", drawing.to_xml())
+            inject_drawing(path, sheet_part(path, plan.title), drawing.to_xml())
         return path
+
+    def _base(self, source: bytes):
+        """書き出しの土台になる本を用意する。"""
+        if source:
+            try:
+                # 数式はそのまま残したいので、計算結果ではなく数式を読む
+                return load_workbook(io.BytesIO(source), data_only=False)
+            except Exception:  # noqa: BLE001 - 開けなければ新しく作る
+                pass
+        workbook = Workbook()
+        workbook.remove(workbook.active)     # 既定の空シートは使わない
+        return workbook
+
+    def _clear_known(self, workbook, plan_sheet: str = "") -> int:
+        """このツールが作るシートを消し、そこへ置き直す位置を返す。
+
+        言語違いの名前 (Schedule など) と、日程表として読んだシートを消す。
+        足してあるシートには触らないので、その並び順は変わらない。
+        """
+        known = [n for n in workbook.sheetnames
+                 if n in KNOWN_SHEETS or n == plan_sheet]
+        at = workbook.sheetnames.index(known[0]) if known else 0
+        for name in known:
+            del workbook[name]
+        return min(at, len(workbook.sheetnames))
 
     # ==================================================================
     # スケジュールシート

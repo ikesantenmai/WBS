@@ -154,8 +154,11 @@ class ImportedWBS:
     rows: List[Row] = field(default_factory=list)
     #: 読めなかったセルの説明 (画面に出して知らせる)
     warnings: List[str] = field(default_factory=list)
-    #: このツールが使わないシート。中身は見ずに、書き出しへそのまま引き継ぐ。
-    extra_sheets: List[Any] = field(default_factory=list)
+    #: 元のファイルの中身。足してあるシートがあるときだけ控える。書き出しは
+    #: これを土台にするので、足したシートに手を入れずに済む。
+    source: Optional[bytes] = None
+    #: 日程表として読んだシートの名前 (書き出しで作り直すので、土台からは消す)
+    plan_sheet: str = ""
 
 
 # ----------------------------------------------------------------------
@@ -186,7 +189,8 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
-                       extra_sheets=_extra_sheets(source, book, sheet.title))
+                       plan_sheet=sheet.title,
+                       source=_source_bytes(source) if _has_extra(book) else None)
 
 
 #: 導出のたびに書かれた値へ戻す項目
@@ -430,24 +434,25 @@ def _pick_plan_sheet(book, language: str):
                             "no_task_column" if found_header else "no_header"))
 
 
-def _extra_sheets(source, book, plan_title: str):
-    """このツールが使わないシートを、書き出しへ引き継ぐために読み直す。
-
-    値だけでなく数式や書式も残したいので、計算結果ではなく数式が入る
-    読み方でもう一度開く。開けなければ諦める (診断ではないので黙って)。
-    """
+def _has_extra(book) -> bool:
+    """このツールが使わないシートが足してあるか。"""
     known = PLAN_SHEETS | CONFIG_SHEETS | MEMBER_SHEETS
-    names = [name for name in book.sheetnames
-             if name != plan_title and name not in known]
-    if not names:
-        return []
+    return any(name not in known for name in book.sheetnames)
+
+
+def _source_bytes(source) -> Optional[bytes]:
+    """元のファイルの中身をそのまま控える。読めなければ ``None``。
+
+    足してあるシートに手を入れずに書き出すため、書き出しはこの中身を
+    土台にして、このツールが使う 3 シートだけを差し替える。
+    """
     try:
         if hasattr(source, "seek"):
             source.seek(0)
-        formulas = load_workbook(source, data_only=False, read_only=False)
-    except Exception:  # noqa: BLE001 - 引き継げなくても読み込みは続ける
-        return [book[name] for name in names]
-    return [formulas[name] for name in names if name in formulas.sheetnames]
+            return source.read()
+        return Path(source).read_bytes()
+    except Exception:  # noqa: BLE001 - 控えられなくても読み込みは続ける
+        return None
 
 
 # ----------------------------------------------------------------------

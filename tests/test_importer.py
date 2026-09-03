@@ -2,6 +2,7 @@
 
 import datetime as dt
 import time
+import zipfile
 
 import openpyxl
 import pytest
@@ -408,7 +409,8 @@ def test_an_extra_sheet_does_not_disturb_reading(make_filled):
                       fill=lambda s: s.__setitem__("A1", "打合せメモ"))
     imported = read(path, base_date=BASE)
     assert [r.name for r in imported.rows][:2] == ["要件定義", "基本設計"]
-    assert [s.title for s in imported.extra_sheets] == ["メモ"]
+    # 足してあるシートがあるので、元のファイルを書き出しの土台として控える
+    assert imported.source == path.read_bytes()
 
 
 def test_an_extra_sheet_is_written_out_again(make_filled, tmp_path):
@@ -431,6 +433,7 @@ def test_an_extra_sheet_is_written_out_again(make_filled, tmp_path):
 
     book = openpyxl.load_workbook(out)
     # 日程表は 1 枚目のまま (ガントの図形の差し込み先が 1 枚目のため)
+    # 元のファイルの並びのまま、3 シートだけが差し替わる
     assert book.sheetnames == [SHEET_PLAN, "担当者一覧", "設定", "課題管理"]
     sheet = book["課題管理"]
     assert sheet["A1"].value == "課題一覧"
@@ -444,18 +447,21 @@ def test_an_extra_sheet_is_written_out_again(make_filled, tmp_path):
 
 
 def test_the_gantt_shapes_still_land_on_the_schedule_sheet(make_filled, tmp_path):
-    """シートが増えても、図形は日程表のシートに入る。"""
-    import zipfile
-
+    """シートが増えて日程表が 1 枚目でなくなっても、図形はそこに入る。"""
+    from wbsgen.inject import sheet_part
     from wbsgen.workbook import export
 
     path = _add_sheet(make_filled("extra3.xlsx"), "メモ", at=0,
                       fill=lambda s: s.__setitem__("A1", "x"))
     out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
 
+    # 足してあったシートの位置はそのまま (メモが 1 枚目)
+    assert openpyxl.load_workbook(out).sheetnames[0] == "メモ"
+    part = sheet_part(out, SHEET_PLAN)
+    assert part != "xl/worksheets/sheet1.xml"
     with zipfile.ZipFile(out) as archive:
-        assert "xl/drawings/drawing1.xml" in archive.namelist()
-        assert "<drawing" in archive.read("xl/worksheets/sheet1.xml").decode()
+        assert "<drawing" in archive.read(part).decode()
+        assert "<drawing" not in archive.read("xl/worksheets/sheet1.xml").decode()
 
 
 def test_a_renamed_schedule_sheet_is_still_found(make_filled):
@@ -469,7 +475,67 @@ def test_a_renamed_schedule_sheet_is_still_found(make_filled):
 
     imported = read(path, base_date=BASE)
     assert [r.name for r in imported.rows][:1] == ["要件定義"]
-    assert [s.title for s in imported.extra_sheets] == ["表紙"]
+    assert imported.plan_sheet == "ITb 工程表"
+    assert imported.source == path.read_bytes()
+
+
+def test_a_renamed_schedule_sheet_is_not_left_behind(make_filled, tmp_path):
+    """名前を変えてあった日程表は、作り直したぶんと二重にならない。"""
+    from wbsgen.workbook import export
+
+    path = make_filled("renamed2.xlsx")
+    book = openpyxl.load_workbook(path)
+    book[SHEET_PLAN].title = "ITb 工程表"
+    book.create_sheet("表紙", 0)["A1"] = "外部結合テスト"
+    book.save(path)
+
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+    assert openpyxl.load_workbook(out).sheetnames == [
+        "表紙", SHEET_PLAN, "担当者一覧", "設定"]
+
+
+def test_a_chart_and_an_image_on_an_extra_sheet_survive(make_filled, tmp_path):
+    """足したシートのグラフ・画像・条件付き書式などがそのまま残る。
+
+    書き出しは元のファイルを土台にして 3 シートだけ差し替えるので、
+    足したシートには手が入らない。
+    """
+    from openpyxl.chart import BarChart, Reference
+    from openpyxl.formatting.rule import CellIsRule
+    from openpyxl.styles import PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    from wbsgen.workbook import export
+
+    def fill(sheet):
+        sheet["A1"], sheet["B1"] = "項目", "件数"
+        for i, (name, count) in enumerate([("設計", 5), ("製造", 12)], 2):
+            sheet[f"A{i}"], sheet[f"B{i}"] = name, count
+        chart = BarChart()
+        chart.title = "工程別件数"
+        chart.add_data(Reference(sheet, min_col=2, min_row=1, max_row=3),
+                       titles_from_data=True)
+        sheet.add_chart(chart, "D2")
+        sheet.conditional_formatting.add("B2:B3", CellIsRule(
+            operator="greaterThan", formula=["10"],
+            fill=PatternFill(bgColor="FFC7CE")))
+        rule = DataValidation(type="list", formula1='"未,済"')
+        sheet.add_data_validation(rule)
+        rule.add("C2:C3")
+        sheet.auto_filter.ref = "A1:C3"
+        sheet.sheet_properties.tabColor = "FF9900"
+
+    path = _add_sheet(make_filled("chart.xlsx"), "集計", fill=fill)
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    with zipfile.ZipFile(out) as archive:
+        assert "xl/charts/chart1.xml" in archive.namelist()
+
+    sheet = openpyxl.load_workbook(out)["集計"]
+    assert len(list(sheet.conditional_formatting)) == 1
+    assert len(sheet.data_validations.dataValidation) == 1
+    assert sheet.auto_filter.ref == "A1:C3"
+    assert sheet.sheet_properties.tabColor.rgb.endswith("FF9900")
 
 
 def test_a_file_with_no_schedule_sheet_is_still_rejected(tmp_path):
