@@ -69,6 +69,23 @@ class Labels:
     work_on: str
     work_off: str
 
+    #: 要員稼働チェックのシート
+    load_sheet: str
+    load_sheet_dated: str
+    load_title: str
+    load_note: str
+    load_date: str
+    load_weekday: str
+    load_working: str
+    load_on: str
+    load_off: str
+    load_workdays: str
+    load_busy: str
+    load_free: str
+    load_free_list: str
+    load_free_item: str
+    load_legend: str
+
     #: 状態の文言 (``{days}`` に日数が入る)
     status_done: str
     status_delayed: str
@@ -117,6 +134,23 @@ JA = Labels(
     weekday_names=("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"),
     work_on="出",
     work_off="休",
+    load_sheet="要員稼働チェック_{month}月",
+    load_sheet_dated="要員稼働チェック_{year}年{month}月",
+    load_title="◆要員稼働チェック（{start}〜{end}）",
+    load_note="「{sheet}」の担当欄に名前がある行の予定期間を日別に数えたものです。"
+              "数値＝その日に割り当てられているタスク数。",
+    load_date="日付",
+    load_weekday="曜日",
+    load_working="稼働判定",
+    load_on="稼",
+    load_off="休",
+    load_workdays="稼働日数",
+    load_busy="タスク有日数",
+    load_free="空き日数",
+    load_free_list="空き日の内訳",
+    load_free_item="{month}/{day}({weekday})",
+    load_legend="凡例：赤=タスク無し（要対応）／緑=1〜2件／"
+                "橙=3件以上（過負荷の可能性）／灰=非稼働日",
     status_done="完了",
     status_delayed="遅れ {days} 日",
     status_remaining="残り {days} 日",
@@ -164,6 +198,23 @@ EN = Labels(
                    "Friday", "Saturday", "Sunday"),
     work_on="Work",
     work_off="Off",
+    load_sheet="Workload_{month:02d}",
+    load_sheet_dated="Workload_{year}-{month:02d}",
+    load_title="Workload check ({start} - {end})",
+    load_note="Tasks per day, counted from the planned period of every row in"
+              " \"{sheet}\" whose Owner column names the person.",
+    load_date="Date",
+    load_weekday="Day",
+    load_working="Working",
+    load_on="Work",
+    load_off="Off",
+    load_workdays="Working days",
+    load_busy="Days with tasks",
+    load_free="Free days",
+    load_free_list="Which days are free",
+    load_free_item="{month}/{day}({weekday})",
+    load_legend="Red = no task (needs attention) / Green = 1-2 /"
+                " Orange = 3 or more (possibly overloaded) / Grey = non-working day",
     status_done="Done",
     status_delayed="Delayed {days} d",
     status_remaining="Remaining {days} d",

@@ -26,6 +26,26 @@ C_SATURDAY = "EFF3FF"      # 土曜列
 C_GRID = "BFBFBF"          # チャート罫線
 C_NOWLINE = "E0203C"       # 現在日線
 
+# 要員稼働チェック (添付の元表と同じ配色)
+C_LOAD_HEADER = "DDEBF7"   # 日付・曜日・稼働判定の帯
+C_LOAD_OFF = "F2F2F2"      # 非稼働日
+C_LOAD_NONE = "FF7C80"     # タスク無し (要対応)
+C_LOAD_OK = "C6E0B4"       # 1〜2 件
+C_LOAD_HEAVY = "FFC000"    # 3 件以上 (過負荷の可能性)
+C_NOTE_FONT = "808080"     # 説明・凡例の文字
+
+#: 要員稼働チェックの日付列 (1 日ぶん) の幅と、件数欄の書式
+COL_LOAD_FIRST = 3
+COL_LOAD_FIRST_LETTER = "C"
+LOAD_DAY_WIDTH_PX = 30
+LOAD_COUNT_FORMAT = '0;;""'
+DATE_MD = "m/d"
+
+
+def rule_fill(color: str) -> PatternFill:
+    """条件付き書式の塗り。差分書式では背景色のほうが使われる。"""
+    return PatternFill(patternType="solid", start_color="00000000", bgColor=color)
+
 #: 状態表示の書式 (背景色, 文字色, 太字)。添付ファイルから抽出したもの。
 #: キーは :func:`wbsgen.i18n.status_kind` が返す種類。
 STATUS_STYLES = {

@@ -327,6 +327,30 @@ remaining orange, upcoming light blue).
 The exported file can be imported again; the tests check that the contents,
 period and totals round-trip.
 
+### The workload check
+
+The exported file carries a **workload sheet for each month**. It counts, day
+by day, the planned periods of every row whose Owner column names the person,
+so you can see at a glance who is free and who is stacked up.
+
+|  | What it holds |
+|---|---------------|
+| Rows | The names that appear in the Owner column, in the order they appear |
+| Columns | Every day the plan covers, one sheet per month |
+| Values | How many tasks are assigned to that person on that day |
+| Totals | Working days / days with tasks / free days / which days are free |
+
+The colours match the original sheet (**red** = a working day with no task,
+**green** = 1-2, **orange** = 3 or more, **grey** = a non-working day). They are
+conditional formatting, so they follow along if you edit the numbers. Working
+days come from the Settings sheet.
+
+An Owner cell often names several people ("Yoshida/Kikuchi", "Sasaki (Takase)"),
+so it is split into individual names. Counting then asks whether the name is
+*contained* in the cell, so "Sasaki (Takase)" counts for both.
+
+No sheet is added when nobody is named. Very long plans stop after 24 months.
+
 ### API
 
 | Method | Path | Purpose |
@@ -388,6 +412,7 @@ src/wbsgen/
   blank.py       the sheet spec (period, unit, blank rows, working days, language)
   timeline.py    the calendar axis and its two-row heading
   workcal.py     working-day rules and Japanese public holidays
+  workload.py    the workload check per member
   style.py       colours and formats (taken from the original file)
   workbook.py    writing Excel
   importer.py    reading a filled-in Excel file

@@ -432,9 +432,9 @@ def test_an_extra_sheet_is_written_out_again(make_filled, tmp_path):
     out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
 
     book = openpyxl.load_workbook(out)
-    # 日程表は 1 枚目のまま (ガントの図形の差し込み先が 1 枚目のため)
-    # 元のファイルの並びのまま、3 シートだけが差し替わる
-    assert book.sheetnames == [SHEET_PLAN, "担当者一覧", "設定", "課題管理"]
+    # 元のファイルの並びのまま、このツールが作るシートだけが差し替わる
+    assert book.sheetnames[:3] == [SHEET_PLAN, "担当者一覧", "設定"]
+    assert book.sheetnames[-1] == "課題管理"
     sheet = book["課題管理"]
     assert sheet["A1"].value == "課題一覧"
     assert sheet["A1"].font.b and sheet["A1"].font.sz == 14
@@ -490,8 +490,9 @@ def test_a_renamed_schedule_sheet_is_not_left_behind(make_filled, tmp_path):
     book.save(path)
 
     out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
-    assert openpyxl.load_workbook(out).sheetnames == [
-        "表紙", SHEET_PLAN, "担当者一覧", "設定"]
+    names = openpyxl.load_workbook(out).sheetnames
+    assert names[:4] == ["表紙", SHEET_PLAN, "担当者一覧", "設定"]
+    assert "ITb 工程表" not in names
 
 
 def test_a_chart_and_an_image_on_an_extra_sheet_survive(make_filled, tmp_path):

@@ -9,6 +9,8 @@
 - :func:`write`  … 記入用の空行だけの WBS (中身なし)
 - :func:`export` … 読み込んだ WBS を、ガントチャートの図形つきで書き出す
 
+書き出しでは、担当ごとの「要員稼働チェック」を月ごとのシートとして足す。
+
 図形は元の Excel ツールと同じく浮動図形 (DrawingML) として描くので、
 週表示・月表示でもバーの端が日付どおりの位置に載る。
 """
@@ -18,9 +20,10 @@ from __future__ import annotations
 import datetime as _dt
 import io
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -30,6 +33,7 @@ from .drawing import Drawing, Geometry, Shape
 from .i18n import LABELS, Labels, labels as get_labels, status_kind
 from .inject import inject_drawing, sheet_part
 from .timeline import UNIT_DAY, Timeline
+from .workload import WorkloadMonth, build as build_workload
 
 #: 既定 (日本語) のシート名。英語版では :class:`~wbsgen.i18n.Labels` の値を使う。
 SHEET_PLAN = "スケジュール"
@@ -83,6 +87,12 @@ PLAN_COLUMNS = (style.COL_START, style.COL_DAYS, style.COL_END)
 
 MEMBER_SHEET_ROWS = 12
 
+# 要員稼働チェックの行位置 (添付の元表と同じ)
+LOAD_ROW_DATE = 4
+LOAD_ROW_WEEKDAY = 5
+LOAD_ROW_WORKING = 6
+LOAD_ROW_FIRST = 7
+
 #: 行の中のバーの縦位置 (0.0=上端, 1.0=下端)
 PLAN_TOP_WITH_ACTUAL = 0.12
 PLAN_BOTTOM_WITH_ACTUAL = 0.48
@@ -105,8 +115,10 @@ def export(imported, path, base_date=None) -> Path:
     day = base_date or _dt.date.today()
     # 状態と遅れは基準日で決まるので、この日付で数え直してから書く
     resolve(imported.rows, spec.calendar(), day, spec.language)
-    return _Writer(spec, rows=imported.rows, base_date=day).save(
-        path, source=imported.source, plan_sheet=imported.plan_sheet)
+    writer = _Writer(spec, rows=imported.rows, base_date=day)
+    writer.workload = build_workload(imported.rows, spec.calendar())
+    return writer.save(path, source=imported.source,
+                       plan_sheet=imported.plan_sheet)
 
 
 #: このツールが作る (= 書き出しで差し替える) シート名。言語ぶんすべて。
@@ -114,12 +126,37 @@ KNOWN_SHEETS = ({text.sheet_plan for text in LABELS.values()}
                 | {text.sheet_member for text in LABELS.values()}
                 | {text.sheet_config for text in LABELS.values()})
 
+def _md(day: _dt.date, since: _dt.date = None) -> str:
+    """タイトルに出す日付。同じ年なら年を省く (2026/9/3〜9/30)。"""
+    if since is not None and since.year == day.year:
+        return f"{day.month}/{day.day}"
+    return f"{day.year}/{day.month}/{day.day}"
+
+
+def _needs_year(months) -> bool:
+    """同じ月が 2 度出てくるなら、シート名に年を入れる。"""
+    seen = [m.month for m in months]
+    return len(seen) != len(set(seen))
+
+
+#: 要員稼働チェックのシート名の頭 (月ごとに増えるので、前方一致で見分ける)
+LOAD_PREFIXES = tuple(sorted(
+    {text.load_sheet.split("{")[0] for text in LABELS.values()}
+    | {text.load_sheet_dated.split("{")[0] for text in LABELS.values()}))
+
+
+def is_generated(name: str) -> bool:
+    """このツールが作るシートか (書き出しのたびに作り直す)。"""
+    return name in KNOWN_SHEETS or name.startswith(LOAD_PREFIXES)
+
 
 class _Writer:
     def __init__(self, spec: BlankWBS, rows=None, base_date=None):
         self.spec = spec
         self.labels: Labels = get_labels(spec.language)
         self.rows = list(rows or [])
+        #: 要員稼働チェック (月ごと)。空なら作らない。
+        self.workload: List[WorkloadMonth] = []
         self.base_date = base_date or _dt.date.today()
         self.calendar = spec.calendar()
         self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
@@ -148,6 +185,7 @@ class _Writer:
         self._plan_sheet(plan)
         self._member_sheet(workbook.create_sheet(self.labels.sheet_member, at + 1))
         self._config_sheet(workbook.create_sheet(self.labels.sheet_config, at + 2))
+        self._workload_sheets(workbook, at + 3)
         workbook.save(path)
 
         drawing = self._gantt()
@@ -170,11 +208,12 @@ class _Writer:
     def _clear_known(self, workbook, plan_sheet: str = "") -> int:
         """このツールが作るシートを消し、そこへ置き直す位置を返す。
 
-        言語違いの名前 (Schedule など) と、日程表として読んだシートを消す。
+        言語違いの名前 (Schedule など)、前に作った要員稼働チェック、
+        日程表として読んだシートを消す。
         足してあるシートには触らないので、その並び順は変わらない。
         """
         known = [n for n in workbook.sheetnames
-                 if n in KNOWN_SHEETS or n == plan_sheet]
+                 if is_generated(n) or n == plan_sheet]
         at = workbook.sheetnames.index(known[0]) if known else 0
         for name in known:
             del workbook[name]
@@ -532,6 +571,147 @@ class _Writer:
             if name:
                 swatch = ws.cell(row=row, column=3)
                 swatch.fill = style.fill(palette[i % len(palette)])
+
+    # ==================================================================
+    # 要員稼働チェック
+    # ==================================================================
+    def _workload_sheets(self, workbook, at: int) -> None:
+        """月ごとの要員稼働チェックを足す。"""
+        dated = _needs_year(self.workload)
+        for offset, month in enumerate(self.workload):
+            template = (self.labels.load_sheet_dated if dated
+                        else self.labels.load_sheet)
+            title = template.format(year=month.year, month=month.month)
+            self._workload_sheet(workbook.create_sheet(title, at + offset), month)
+
+    def _workload_sheet(self, ws: Worksheet, month: WorkloadMonth) -> None:
+        """1 か月ぶんの稼働チェックを書く。
+
+        添付いただいた元表と同じ並び。日ごとの件数は数式ではなく
+        数え終えた値を入れる (このツールの稼働日の数え方と必ず揃うように)。
+        """
+        text = self.labels
+        first = style.COL_LOAD_FIRST
+        last = first + len(month.days) - 1
+        total = last + 2                        # 集計欄は 1 列空けた右
+
+        ws.sheet_view.showGridLines = False
+        ws.column_dimensions["A"].width = style.px_to_width(25)
+        ws.column_dimensions["B"].width = style.px_to_width(90)
+        for i in range(len(month.days)):
+            ws.column_dimensions[get_column_letter(first + i)].width = \
+                style.px_to_width(style.LOAD_DAY_WIDTH_PX)
+        for i, px in enumerate((72, 96, 64, 380)):
+            ws.column_dimensions[get_column_letter(total + i)].width = \
+                style.px_to_width(px)
+
+        ws["B1"] = text.load_title.format(
+            start=_md(month.start), end=_md(month.end, month.start))
+        ws["B1"].font = style.font(12, bold=True, color=style.C_TITLE_FONT)
+        ws["B2"] = text.load_note.format(sheet=text.sheet_plan)
+        ws["B2"].font = style.font(9, color=style.C_NOTE_FONT)
+
+        self._workload_head(ws, month, first)
+        for offset, load in enumerate(month.members):
+            self._workload_row(ws, month, load, LOAD_ROW_FIRST + offset, first, total)
+
+        end_row = LOAD_ROW_FIRST + max(len(month.members), 1) - 1
+        legend = ws.cell(row=end_row + 2, column=2, value=text.load_legend)
+        legend.font = style.font(9, bold=True, color=style.C_NOTE_FONT)
+        ws.freeze_panes = f"{style.COL_LOAD_FIRST_LETTER}{LOAD_ROW_FIRST}"
+        self._workload_colors(ws, month, first, last, end_row)
+
+    def _workload_head(self, ws: Worksheet, month: WorkloadMonth, first: int) -> None:
+        """日付・曜日・稼働判定の 3 行。"""
+        text = self.labels
+        rows = (
+            (LOAD_ROW_DATE, text.load_date,
+             [(day, style.DATE_MD) for day in month.days]),
+            (LOAD_ROW_WEEKDAY, text.load_weekday,
+             [(text.weekdays[day.weekday()], None) for day in month.days]),
+            (LOAD_ROW_WORKING, text.load_working,
+             [(text.load_on if on else text.load_off, None) for on in month.workdays]),
+        )
+        for row, label, values in rows:
+            head = ws.cell(row=row, column=2, value=label)
+            head.font = style.font(10, bold=True)
+            head.alignment = style.ALIGN_CENTER
+            head.fill = style.fill(style.C_LOAD_HEADER)
+            head.border = style.BORDER_CELL
+            for i, (value, number_format) in enumerate(values):
+                cell = ws.cell(row=row, column=first + i, value=value)
+                cell.font = style.font(9)
+                cell.alignment = style.ALIGN_CENTER
+                cell.fill = style.fill(style.C_LOAD_HEADER)
+                cell.border = style.BORDER_CELL
+                if number_format:
+                    cell.number_format = number_format
+
+    def _workload_row(self, ws: Worksheet, month: WorkloadMonth, load,
+                      row: int, first: int, total: int) -> None:
+        """1 人ぶんの行と、その右の集計。"""
+        text = self.labels
+        name = ws.cell(row=row, column=2, value=load.name)
+        name.font = style.font(10, bold=True)
+        name.alignment = style.ALIGN_CENTER
+        name.border = style.BORDER_CELL
+
+        for i, count in enumerate(load.counts):
+            cell = ws.cell(row=row, column=first + i, value=count)
+            cell.font = style.font(9)
+            cell.alignment = style.ALIGN_CENTER
+            cell.border = style.BORDER_CELL
+            cell.number_format = style.LOAD_COUNT_FORMAT
+
+        free = ", ".join(
+            text.load_free_item.format(month=day.month, day=day.day,
+                                       weekday=text.weekdays[day.weekday()])
+            for day in load.free_days)
+        summary = (month.workday_count, load.busy_days,
+                   len(load.free_days), free or None)
+        for i, value in enumerate(summary):
+            cell = ws.cell(row=row, column=total + i, value=value)
+            cell.font = style.font(10)
+            cell.border = style.BORDER_CELL
+            cell.alignment = style.ALIGN_LEFT if i == 3 else style.ALIGN_CENTER
+        # 集計の見出しは 1 人目のときに置く
+        if row == LOAD_ROW_FIRST:
+            heads = (text.load_workdays, text.load_busy,
+                     text.load_free, text.load_free_list)
+            for i, label in enumerate(heads):
+                cell = ws.cell(row=LOAD_ROW_DATE, column=total + i, value=label)
+                cell.font = style.font(10, bold=True)
+                cell.alignment = style.ALIGN_CENTER
+                cell.fill = style.fill(style.C_LOAD_HEADER)
+                cell.border = style.BORDER_CELL
+
+    def _workload_colors(self, ws: Worksheet, month: WorkloadMonth,
+                         first: int, last: int, end_row: int) -> None:
+        """件数に応じた色。値を書き換えても効くよう条件付き書式で入れる。"""
+        if not month.members:
+            return
+        head = get_column_letter(first)
+        span = (f"{head}{LOAD_ROW_FIRST}:"
+                f"{get_column_letter(last)}{end_row}")
+        on, off = self.labels.load_on, self.labels.load_off
+        rules = (
+            (f'{head}${LOAD_ROW_WORKING}="{off}"', style.C_LOAD_OFF),
+            (f'AND({head}${LOAD_ROW_WORKING}="{on}",{head}{LOAD_ROW_FIRST}=0)',
+             style.C_LOAD_NONE),
+            (f'AND({head}${LOAD_ROW_WORKING}="{on}",{head}{LOAD_ROW_FIRST}>=3)',
+             style.C_LOAD_HEAVY),
+            (f'AND({head}${LOAD_ROW_WORKING}="{on}",{head}{LOAD_ROW_FIRST}>0)',
+             style.C_LOAD_OK),
+        )
+        for formula, color in rules:
+            ws.conditional_formatting.add(span, FormulaRule(
+                formula=[formula], fill=style.rule_fill(color), stopIfTrue=True))
+
+        free_column = get_column_letter(last + 4)
+        ws.conditional_formatting.add(
+            f"{free_column}{LOAD_ROW_FIRST}:{free_column}{end_row}",
+            FormulaRule(formula=[f"{free_column}{LOAD_ROW_FIRST}>0"],
+                        fill=style.rule_fill(style.C_LOAD_NONE)))
 
     # ==================================================================
     # 設定
