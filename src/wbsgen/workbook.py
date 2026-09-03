@@ -30,7 +30,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from . import style
 from .blank import BlankWBS
 from .drawing import Drawing, Geometry, Shape
-from .i18n import LABELS, Labels, labels as get_labels, status_kind
+from .i18n import Labels, labels as get_labels, status_kind
 from .inject import inject_drawing, sheet_part
 from .timeline import UNIT_DAY, Timeline
 from .workload import WorkloadMonth, build as build_workload
@@ -117,14 +117,8 @@ def export(imported, path, base_date=None) -> Path:
     resolve(imported.rows, spec.calendar(), day, spec.language)
     writer = _Writer(spec, rows=imported.rows, base_date=day)
     writer.workload = build_workload(imported.rows, spec.calendar())
-    return writer.save(path, source=imported.source,
-                       plan_sheet=imported.plan_sheet)
+    return writer.save(path, source=imported.source)
 
-
-#: このツールが作る (= 書き出しで差し替える) シート名。言語ぶんすべて。
-KNOWN_SHEETS = ({text.sheet_plan for text in LABELS.values()}
-                | {text.sheet_member for text in LABELS.values()}
-                | {text.sheet_config for text in LABELS.values()})
 
 def _md(day: _dt.date, since: _dt.date = None) -> str:
     """タイトルに出す日付。同じ年なら年を省く (2026/9/3〜9/30)。"""
@@ -137,17 +131,6 @@ def _needs_year(months) -> bool:
     """同じ月が 2 度出てくるなら、シート名に年を入れる。"""
     seen = [m.month for m in months]
     return len(seen) != len(set(seen))
-
-
-#: 要員稼働チェックのシート名の頭 (月ごとに増えるので、前方一致で見分ける)
-LOAD_PREFIXES = tuple(sorted(
-    {text.load_sheet.split("{")[0] for text in LABELS.values()}
-    | {text.load_sheet_dated.split("{")[0] for text in LABELS.values()}))
-
-
-def is_generated(name: str) -> bool:
-    """このツールが作るシートか (書き出しのたびに作り直す)。"""
-    return name in KNOWN_SHEETS or name.startswith(LOAD_PREFIXES)
 
 
 class _Writer:
@@ -168,24 +151,27 @@ class _Writer:
         self._colors = self._member_colors()
 
     # ------------------------------------------------------------------
-    def save(self, path, source: bytes = None, plan_sheet: str = "") -> Path:
-        """``source`` があれば、その中身を土台にして 3 シートだけ差し替える。
+    def save(self, path, source: bytes = None) -> Path:
+        """``source`` があれば、その中身を土台にして書き出す。
 
-        足してあるシートには触れないので、グラフや画像を含めてそのまま
-        書き出される。``source`` が無ければ、これまでどおり新しく作る。
-        ``plan_sheet`` は日程表として読んだシートの名前 (名前を変えて
-        あっても、作り直すぶんが二重にならないように消す)。
+        **読み込んだときにあったシートは、すべて書き出しにも残す。**
+        消すのは、これから同じ名前で作り直すシートだけ。足してある
+        シートには触れないので、グラフや画像を含めてそのまま書き出される。
+        ``source`` が無ければ、これまでどおり新しく作る。
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         workbook = self._base(source)
-        at = self._clear_known(workbook, plan_sheet)
-        plan = workbook.create_sheet(self.labels.sheet_plan, at)
+        titles = self._titles()
+        at = self._clear(workbook, titles)
+        plan = workbook.create_sheet(titles[0], at)
         self._plan_sheet(plan)
-        self._member_sheet(workbook.create_sheet(self.labels.sheet_member, at + 1))
-        self._config_sheet(workbook.create_sheet(self.labels.sheet_config, at + 2))
-        self._workload_sheets(workbook, at + 3)
+        self._member_sheet(workbook.create_sheet(titles[1], at + 1))
+        self._config_sheet(workbook.create_sheet(titles[2], at + 2))
+        for offset, month in enumerate(self.workload):
+            self._workload_sheet(
+                workbook.create_sheet(titles[3 + offset], at + 3 + offset), month)
         workbook.save(path)
 
         drawing = self._gantt()
@@ -205,17 +191,25 @@ class _Writer:
         workbook.remove(workbook.active)     # 既定の空シートは使わない
         return workbook
 
-    def _clear_known(self, workbook, plan_sheet: str = "") -> int:
-        """このツールが作るシートを消し、そこへ置き直す位置を返す。
+    def _titles(self) -> List[str]:
+        """これから作るシートの名前を、書き出す順に並べる。"""
+        dated = _needs_year(self.workload)
+        template = (self.labels.load_sheet_dated if dated
+                    else self.labels.load_sheet)
+        return [self.labels.sheet_plan, self.labels.sheet_member,
+                self.labels.sheet_config] + [
+            template.format(year=month.year, month=month.month)
+            for month in self.workload]
 
-        言語違いの名前 (Schedule など)、前に作った要員稼働チェック、
-        日程表として読んだシートを消す。
-        足してあるシートには触らないので、その並び順は変わらない。
+    def _clear(self, workbook, titles: List[str]) -> int:
+        """作り直すシートだけを消し、そこへ置き直す位置を返す。
+
+        **同じ名前で作り直すもの以外は消さない。** 読み込んだときに
+        あったシートは、名前も中身もそのまま書き出しに残る。
         """
-        known = [n for n in workbook.sheetnames
-                 if is_generated(n) or n == plan_sheet]
-        at = workbook.sheetnames.index(known[0]) if known else 0
-        for name in known:
+        doomed = [n for n in workbook.sheetnames if n in titles]
+        at = workbook.sheetnames.index(doomed[0]) if doomed else 0
+        for name in doomed:
             del workbook[name]
         return min(at, len(workbook.sheetnames))
 
@@ -575,15 +569,6 @@ class _Writer:
     # ==================================================================
     # 要員稼働チェック
     # ==================================================================
-    def _workload_sheets(self, workbook, at: int) -> None:
-        """月ごとの要員稼働チェックを足す。"""
-        dated = _needs_year(self.workload)
-        for offset, month in enumerate(self.workload):
-            template = (self.labels.load_sheet_dated if dated
-                        else self.labels.load_sheet)
-            title = template.format(year=month.year, month=month.month)
-            self._workload_sheet(workbook.create_sheet(title, at + offset), month)
-
     def _workload_sheet(self, ws: Worksheet, month: WorkloadMonth) -> None:
         """1 か月ぶんの稼働チェックを書く。
 

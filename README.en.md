@@ -208,13 +208,22 @@ Because these sheets are filled in by hand, the following are also accepted.
 - Days as `10`, `10日`, `10 days`, `10d`
 - Progress as `0.8`, `80%`, `80`
 
-**Extra sheets are carried through untouched.** Any sheet other than Schedule,
-Members and Settings (notes, an issue list, a cover page) is never read. The
-export does not build a new file: it **starts from the original and replaces
-only those three sheets**, so the sheets you added are left exactly as they
-were — charts, images, conditional formatting, data validation, autofilters,
-comments, print areas and tab colours included. The sheet order is preserved
-too (the Gantt shapes find the schedule sheet wherever it sits).
+**Every sheet that was there on import is there on export.** The export does
+not build a new file: it **starts from the original and replaces only the
+sheets it rewrites under the same name**.
+
+| Sheet | What the export does |
+|-------|----------------------|
+| Schedule / Members / Settings | Rebuilt under the same name |
+| Workload sheets for the months it generates | Rebuilt under the same name |
+| Everything else | **Left completely untouched** |
+
+"Everything else" covers notes, issue lists, cover pages, a schedule sheet you
+renamed, a hand-made workload sheet for a month outside the plan, and hidden
+sheets. They are never read, so charts, images, conditional formatting, data
+validation, autofilters, comments, print areas and tab colours all survive. The
+sheet order is preserved too (the Gantt shapes find the schedule sheet wherever
+it sits).
 
 **A renamed schedule sheet is still found.** If none of the known sheet names
 match, the first sheet with a Task column is used.

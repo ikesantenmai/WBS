@@ -157,8 +157,6 @@ class ImportedWBS:
     #: 元のファイルの中身。足してあるシートがあるときだけ控える。書き出しは
     #: これを土台にするので、足したシートに手を入れずに済む。
     source: Optional[bytes] = None
-    #: 日程表として読んだシートの名前 (書き出しで作り直すので、土台からは消す)
-    plan_sheet: str = ""
 
 
 # ----------------------------------------------------------------------
@@ -189,7 +187,6 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
-                       plan_sheet=sheet.title,
                        source=_source_bytes(source) if _has_extra(book) else None)
 
 

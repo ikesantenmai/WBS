@@ -475,24 +475,30 @@ def test_a_renamed_schedule_sheet_is_still_found(make_filled):
 
     imported = read(path, base_date=BASE)
     assert [r.name for r in imported.rows][:1] == ["要件定義"]
-    assert imported.plan_sheet == "ITb 工程表"
     assert imported.source == path.read_bytes()
 
 
-def test_a_renamed_schedule_sheet_is_not_left_behind(make_filled, tmp_path):
-    """名前を変えてあった日程表は、作り直したぶんと二重にならない。"""
+def test_every_sheet_from_the_import_is_written_out(make_filled, tmp_path):
+    """読み込んだときにあったシートは、名前を変えてあるものも含めて残す。"""
     from wbsgen.workbook import export
 
-    path = make_filled("renamed2.xlsx")
+    path = make_filled("keep-all.xlsx")
     book = openpyxl.load_workbook(path)
-    book[SHEET_PLAN].title = "ITb 工程表"
+    book[SHEET_PLAN].title = "ITb 工程表"          # 日程表の名前を変えてある
     book.create_sheet("表紙", 0)["A1"] = "外部結合テスト"
+    book.create_sheet("メモ")["A1"] = "打合せ"
+    book.create_sheet("要員稼働チェック_12月")["A1"] = "手作りの表"
+    before = book.sheetnames
     book.save(path)
 
     out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
-    names = openpyxl.load_workbook(out).sheetnames
-    assert names[:4] == ["表紙", SHEET_PLAN, "担当者一覧", "設定"]
-    assert "ITb 工程表" not in names
+    after = openpyxl.load_workbook(out).sheetnames
+    # 読み込み時にあった名前がすべて残っている
+    assert set(before) <= set(after), set(before) - set(after)
+    # このツールが作るぶんは足されている
+    assert {SHEET_PLAN, "担当者一覧", "設定"} <= set(after)
+    # 作り直さないシートの中身はそのまま
+    assert openpyxl.load_workbook(out)["要員稼働チェック_12月"]["A1"].value == "手作りの表"
 
 
 def test_a_chart_and_an_image_on_an_extra_sheet_survive(make_filled, tmp_path):
