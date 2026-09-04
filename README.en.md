@@ -193,7 +193,8 @@ and the Gantt chart side by side.
 - A dashed red line marks **today**
 - Status (Done / In progress / Delayed …) keeps the original colours
 - Hovering a bar shows the plan, actuals, progress, owner and status
-- The **unit** can be switched between daily, weekly and monthly
+- It opens in **daily** units so the day-to-day movement is visible; the
+  **unit** can be switched between daily, weekly and monthly
 
 Columns are found by their heading text, so files with extra or reordered
 columns still read. The period, working days and holidays come from the

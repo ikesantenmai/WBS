@@ -223,6 +223,10 @@ function t(key, values = {}) {
 }
 
 const CHART_WIDTH = { day: 22, week: 42, month: 58 };
+
+//: 読み込んだ WBS を最初に見せるときの表示単位。日ごとの動きが判るよう
+//: 日単位で開く (ファイルの「設定」より優先。上の選択で切り替えられる)。
+const DEFAULT_CHART_UNIT = 'day';
 const ROW_H = 24;
 const HEAD_H = 24;
 
@@ -463,6 +467,9 @@ function buildTable(view, rowCount, withWeekday) {
   const columns = tableColumns();
   const cols = el('colgroup');
   for (const column of columns) cols.append(el('col', { style: `width:${column.width}px` }));
+  // 表そのものの幅も決めておく。決めないと、長い担当名などに引きずられて
+  // 列が広がり、その分だけ日程表が右へ押し出されてしまう。
+  const width = columns.reduce((total, column) => total + column.width, 0);
 
   const head = el('thead');
   const bandRow = el('tr');
@@ -490,7 +497,7 @@ function buildTable(view, rowCount, withWeekday) {
     for (const column of columns) tr.append(tableCell(row, column, view.rows[r - 1]));
     body.append(tr);
   }
-  return el('table', { class: 'wbs' }, cols, head, body);
+  return el('table', { class: 'wbs', style: `width:${width}px` }, cols, head, body);
 }
 
 function tableCell(row, column, previous) {
@@ -729,11 +736,14 @@ async function importFile(file) {
     banner(t('cannot_import', { reason: error.message }));
     return;
   }
-  return importBytes(file.name, bytes);
+  return importBytes(file.name, bytes, DEFAULT_CHART_UNIT, true);
 }
 
-/** 持っている中身を送って読み込む (表示単位を変えたときは読み直す)。 */
-async function importBytes(name, bytes, unit = null) {
+/**
+ * 持っている中身を送って読み込む (表示単位を変えたときは読み直す)。
+ * ``announce`` は「読み込みました」を出すかどうか。
+ */
+async function importBytes(name, bytes, unit = null, announce = false) {
   const body = new FormData();
   body.append('file', new Blob([bytes]), name);
   const query = unit ? `&unit=${encodeURIComponent(unit)}` : '';
@@ -761,7 +771,7 @@ async function importBytes(name, bytes, unit = null) {
         columns: model.timeline.columns.length, rows: model.rows.length,
       }),
     });
-    if (!unit) banner(t('imported', { name }), true);
+    if (announce) banner(t('imported', { name }), true);
   } catch (error) {
     if (token !== importToken) return;
     banner(t('cannot_import', { reason: error.message }));
@@ -869,7 +879,7 @@ async function switchLanguage(value) {
 /** 言語で変わる選択肢 (表示単位・曜日) を入れ直す。 */
 function fillChoices() {
   const unit = $('#unit').value || 'week';
-  const chartUnit = $('#chart-unit').value || 'week';
+  const chartUnit = $('#chart-unit').value || DEFAULT_CHART_UNIT;
   const options = () => meta.units.map(
     (u) => el('option', { value: u.value, text: u.label }));
   $('#unit').replaceChildren(...options());
@@ -885,7 +895,7 @@ function fillChoices() {
 // ---------------------------------------------------------------- 入力
 function buildForm() {
   $('#unit').value = 'week';
-  $('#chart-unit').value = 'week';
+  $('#chart-unit').value = DEFAULT_CHART_UNIT;
   $('#rows').value = meta.default_rows;
   $('#rows').max = meta.max_rows;
   $('#start').value = meta.suggested.start;

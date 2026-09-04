@@ -225,13 +225,23 @@ def test_importing_a_workbook_draws_a_gantt_chart(page, filled_book):
     assert page.errors == []
 
 
+def test_the_chart_opens_in_day_units(page, filled_book):
+    """読み込んだ WBS は、まず日単位で見せる。"""
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_selector("svg.chart-head[data-unit=day]")
+    assert page.eval_on_selector("#chart-unit", "n => n.value") == "day"
+
+
 def test_the_chart_unit_can_be_switched(page, filled_book):
     page.set_input_files("#import-file", str(filled_book))
-    page.wait_for_selector("svg.chart-head[data-unit=week]")
+    page.wait_for_selector("svg.chart-head[data-unit=day]")
 
     page.select_option("#chart-unit", "month")
     page.wait_for_selector("svg.chart-head[data-unit=month]")
     assert _months(page)[:2] == ["2026年", "2027年"]
+
+    page.select_option("#chart-unit", "week")
+    page.wait_for_selector("svg.chart-head[data-unit=week]")
 
     page.select_option("#chart-unit", "day")
     page.wait_for_selector("svg.chart-head[data-unit=day]")
