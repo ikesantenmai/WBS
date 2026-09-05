@@ -229,6 +229,16 @@ it sits).
 **A renamed schedule sheet is still found.** If none of the known sheet names
 match, the first sheet with a Task column is used.
 
+**Font colours you set are kept.** A colour set on a cell (a task name in red,
+an owner in blue) is recorded on import and written back on export, and the
+table on screen shows it too. Cells with no colour of their own keep the usual
+one (navy for planned dates, black elsewhere).
+
+The Status column is the exception: its text is recalculated by the tool, so
+its colour follows what was calculated (done grey, delayed pink, remaining
+orange, upcoming light blue). When the status text does not change, neither
+does its colour.
+
 **Indentation in a task name is kept.** Names are often indented with leading
 spaces (full-width or ASCII) to show the hierarchy, so no whitespace is
 trimmed: the name reaches the screen and the exported Excel exactly as it was

@@ -390,6 +390,26 @@ def test_the_indent_in_a_task_name_is_shown(page, make_filled):
 
 
 
+def test_the_font_colour_is_shown_as_written(page, make_filled):
+    """記入した文字色は、画面でもそのまま見せる。"""
+    book = make_filled("color-ui.xlsx")
+    import openpyxl
+    from wbsgen.workbook import SHEET_PLAN
+    wb = openpyxl.load_workbook(book)
+    cell = wb[SHEET_PLAN]["E5"]
+    cell.font = openpyxl.styles.Font(name=cell.font.name, size=cell.font.sz,
+                                     color="FFFF0000")
+    wb.save(book)
+
+    page.set_input_files("#import-file", str(book))
+    # 直前のテストの表が残っていることがあるので、この色になるまで待つ
+    page.wait_for_function("""() => {
+        const cell = document.querySelector('table.wbs tbody td.name');
+        return cell && getComputedStyle(cell).color === 'rgb(255, 0, 0)';
+    }""")
+    assert page.errors == []
+
+
 # ---------------------------------------------------------------- 処理中の表示
 class _Held:
     """通信を握って離さないでおく。処理中の画面をゆっくり確かめるため。

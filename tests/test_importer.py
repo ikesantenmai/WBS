@@ -555,6 +555,63 @@ def test_a_file_with_no_schedule_sheet_is_still_rejected(tmp_path):
         read(path)
 
 
+# ---------------------------------------------------------------- 文字色
+def _paint(path, cells, sheet=SHEET_PLAN):
+    book = openpyxl.load_workbook(path)
+    target = book[sheet]
+    for coordinate, color in cells.items():
+        cell = target[coordinate]
+        cell.font = openpyxl.styles.Font(
+            name=cell.font.name, size=cell.font.sz, color=color)
+    book.save(path)
+    return path
+
+
+def test_the_font_colour_of_each_cell_is_read(make_filled):
+    """記入した文字色を控える (書き出しでそのまま戻すため)。"""
+    path = _paint(make_filled("color.xlsx"),
+                  {"E5": "FFFF0000", "Q6": "FF0070C0", "F7": "FF00B050"})
+    rows = read(path, base_date=BASE).rows
+    assert rows[0].colors["name"] == "FFFF0000"
+    assert rows[1].colors["member"] == "FF0070C0"
+    assert rows[2].colors["start"] == "FF00B050"
+
+
+def test_the_font_colour_survives_the_export(make_filled, tmp_path):
+    """読み込んだ文字色を、書き出しで既定色に変えてしまわない。"""
+    from wbsgen.workbook import export
+
+    path = _paint(make_filled("color2.xlsx"),
+                  {"E5": "FFFF0000", "Q6": "FF0070C0", "F7": "FF00B050"})
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["E5"].font.color.rgb == "FFFF0000"
+    assert sheet["Q6"].font.color.rgb == "FF0070C0"
+    assert sheet["F7"].font.color.rgb == "FF00B050"
+
+
+def test_cells_without_a_colour_keep_the_usual_one(make_filled, tmp_path):
+    """色を指定していないセルは、これまでどおりの色で書く。"""
+    from wbsgen.workbook import export
+
+    out = export(read(make_filled("plain.xlsx"), base_date=BASE),
+                 tmp_path / "out.xlsx", BASE)
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["F5"].font.color.rgb[-6:] == "000080"    # 予定は紺
+    assert sheet["E5"].font.color.rgb[-6:] == "000000"    # ほかは黒
+
+
+def test_the_colour_survives_two_round_trips(make_filled, tmp_path):
+    """書き出したものを読み直しても、色は変わらない。"""
+    from wbsgen.workbook import export
+
+    path = _paint(make_filled("color3.xlsx"), {"E5": "FFFF0000"})
+    once = export(read(path, base_date=BASE), tmp_path / "a.xlsx", BASE)
+    twice = export(read(once, base_date=BASE), tmp_path / "b.xlsx", BASE)
+    assert openpyxl.load_workbook(twice)[SHEET_PLAN]["E5"].font.color.rgb == "FFFF0000"
+
+
 # ---------------------------------------------------------------- 項目名の空白
 def test_the_indent_in_a_task_name_is_kept(make_filled):
     """項目名の行頭の空白 (階層を表す字下げ) をそのまま読む。"""

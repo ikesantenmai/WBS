@@ -528,6 +528,9 @@ function tableCell(row, column, previous) {
   if ((row.derived || []).includes(column.key)) {
     td.classList.add('derived');
     td.title = t(`derived_${column.key}`);
+  } else if (row.colors && row.colors[column.key]) {
+    // セルに指定されていた文字色は、そのまま見せる
+    td.style.color = row.colors[column.key];
   }
   return td;
 }

@@ -67,6 +67,9 @@ TABLE_COLUMNS = [
 #: 表側の列文字だけ (書式を敷くのに使う)
 TABLE_LETTERS = [letter for _key, letter, _group in TABLE_COLUMNS]
 
+#: 列文字 -> 属性名 (記入されていた文字色を引き当てるのに使う)
+COLUMN_KEYS = {letter: key for key, letter, _group in TABLE_COLUMNS}
+
 #: 記入欄に入れておく表示形式 (``date`` / ``days`` は言語ごとに差し替える)
 CELL_FORMATS = {
     style.COL_START: "date",
@@ -375,7 +378,7 @@ class _Writer:
         for index, row in enumerate(self.rows):
             at = self.first_row + index
             ws.row_dimensions[at].height = style.ROW_HEIGHT_TASK
-            self._format_row(ws, at)
+            self._format_row(ws, at, row)
             for col in self.timeline.columns:
                 cell = ws.cell(row=at, column=first + col.index)
                 rest = self.timeline.is_rest_column(col)
@@ -409,15 +412,21 @@ class _Writer:
                 self._status_style(ws[f"{style.COL_STATUS}{at}"], row.status)
             previous = row
 
-    def _format_row(self, ws: Worksheet, row: int) -> None:
-        """1 行ぶんの罫線・色・表示形式を入れる。"""
+    def _format_row(self, ws: Worksheet, row: int, source=None) -> None:
+        """1 行ぶんの罫線・色・表示形式を入れる。
+
+        ``source`` があれば、そのセルに指定されていた文字色をそのまま使う
+        (読み込んだ色を、書き出しで既定色に変えてしまわないため)。
+        """
+        written = getattr(source, "colors", None) or {}
         for letter in TABLE_LETTERS:
             cell = ws[f"{letter}{row}"]
             cell.fill = style.fill(
                 style.C_PLAN_CELL if letter in PLAN_COLUMNS else style.C_WHITE)
             cell.border = style.BORDER_CELL
-            cell.font = style.font(
-                color=style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000")
+            color = written.get(COLUMN_KEYS[letter]) or (
+                style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000")
+            cell.font = style.font(color=color)
             cell.alignment = style.ALIGN_CENTER
             number_format = self._cell_format(letter)
             if number_format:

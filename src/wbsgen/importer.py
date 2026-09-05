@@ -118,6 +118,8 @@ class Row:
     predecessor: str = ""
     member: str = ""
     status: str = ""
+    #: セルに指定されていた文字色 (属性名 -> ARGB)。書き出しでそのまま戻す。
+    colors: Dict[str, str] = field(default_factory=dict)
     #: 記入内容から導き出した項目の名前 (画面で薄く見せるため)
     derived: set = field(default_factory=set)
     #: セルに書かれていた値。導出をやり直せるように控えておく。
@@ -607,6 +609,8 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
         row.effort = cell("effort", _number)
         # 導出をやり直せるよう、書かれていた値を控える
         row.written = {key: getattr(row, key) for key in WRITTEN_FIELDS}
+        # 文字色は書き出しでそのまま戻すので、ここで控えておく
+        row.colors = _cell_colors(sheet, index, columns)
 
         # 項目名も予定も無い行でも、実績が入っていれば残す
         # (実績の終了日だけを記録してある行を落とさないため)
@@ -618,6 +622,21 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
             break
 
     return rows, warnings
+
+
+def _cell_colors(sheet, index: int, columns: Dict[str, int]) -> Dict[str, str]:
+    """その行のセルに指定されている文字色を控える。
+
+    書き出しでは表を作り直すので、控えておかないと記入した文字色が
+    このツールの既定色 (予定は紺、ほかは黒) に置き換わってしまう。
+    テーマ色や色番号は書き戻せないので、RGB で指定されたものだけを見る。
+    """
+    out: Dict[str, str] = {}
+    for key, column in columns.items():
+        color = sheet.cell(row=index, column=column).font.color
+        if color is not None and color.type == "rgb" and isinstance(color.rgb, str):
+            out[key] = color.rgb
+    return out
 
 
 # ----------------------------------------------------------------------
