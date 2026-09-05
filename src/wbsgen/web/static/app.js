@@ -510,6 +510,7 @@ function tableCell(row, column, previous) {
       && previous && previous[column.key] === value) value = '';
 
   if (column.key === 'status' && value) {
+    // 状態だけは文字そのものを計算し直すので、色も計算に合わせる
     td.append(el('span', {
       text: value,
       style: row.status_bg ? `background:${row.status_bg};color:${row.status_fg}` : '',
@@ -524,12 +525,13 @@ function tableCell(row, column, previous) {
   } else if (value == null) value = '';
 
   td.textContent = value;
-  // 記入内容から導き出した値は薄く見せ、理由を添える
+  // 記入内容から導き出した値は斜体にして、理由を添える
   if ((row.derived || []).includes(column.key)) {
     td.classList.add('derived');
     td.title = t(`derived_${column.key}`);
-  } else if (row.colors && row.colors[column.key]) {
-    // セルに指定されていた文字色は、そのまま見せる
+  }
+  // セルに指定されていた文字色は、導き出した値でもそのまま見せる
+  if (row.colors && row.colors[column.key]) {
     td.style.color = row.colors[column.key];
   }
   return td;

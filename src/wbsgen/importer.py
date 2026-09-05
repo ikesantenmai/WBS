@@ -624,8 +624,12 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
     return rows, warnings
 
 
+#: 文字色を控えない列。状態は文字そのものを計算し直すので、色も計算に合わせる。
+COLOR_SKIP = frozenset({"status"})
+
+
 def _cell_colors(sheet, index: int, columns: Dict[str, int]) -> Dict[str, str]:
-    """その行のセルに指定されている文字色を控える。
+    """その行のセルに指定されている文字色を控える (大項目〜担当)。
 
     書き出しでは表を作り直すので、控えておかないと記入した文字色が
     このツールの既定色 (予定は紺、ほかは黒) に置き換わってしまう。
@@ -633,6 +637,8 @@ def _cell_colors(sheet, index: int, columns: Dict[str, int]) -> Dict[str, str]:
     """
     out: Dict[str, str] = {}
     for key, column in columns.items():
+        if key in COLOR_SKIP:
+            continue
         color = sheet.cell(row=index, column=column).font.color
         if color is not None and color.type == "rgb" and isinstance(color.rgb, str):
             out[key] = color.rgb

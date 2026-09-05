@@ -436,7 +436,11 @@ class _Writer:
             ws[f"{letter}{row}"].alignment = style.ALIGN_LEFT
 
     def _status_style(self, cell, status: str) -> None:
-        """状態の色。書かれた言葉から種類を判定する (日英どちらでも効く)。"""
+        """状態の色。書かれた言葉から種類を判定する (日英どちらでも効く)。
+
+        この列だけは文字そのものを計算し直すので、色も計算に合わせる。
+        大項目〜担当の文字色は記入されたものをそのまま使う。
+        """
         kind = status_kind(status)
         if kind is None:
             return

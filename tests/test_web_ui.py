@@ -396,9 +396,11 @@ def test_the_font_colour_is_shown_as_written(page, make_filled):
     import openpyxl
     from wbsgen.workbook import SHEET_PLAN
     wb = openpyxl.load_workbook(book)
-    cell = wb[SHEET_PLAN]["E5"]
-    cell.font = openpyxl.styles.Font(name=cell.font.name, size=cell.font.sz,
-                                     color="FFFF0000")
+    for coordinate, colour in (("E5", "FFFF0000"),     # 項目
+                               ("H9", "FF7030A0")):    # 導き出す終了日
+        cell = wb[SHEET_PLAN][coordinate]
+        cell.font = openpyxl.styles.Font(name=cell.font.name, size=cell.font.sz,
+                                         color=colour)
     wb.save(book)
 
     page.set_input_files("#import-file", str(book))
@@ -407,6 +409,10 @@ def test_the_font_colour_is_shown_as_written(page, make_filled):
         const cell = document.querySelector('table.wbs tbody td.name');
         return cell && getComputedStyle(cell).color === 'rgb(255, 0, 0)';
     }""")
+    # 導き出した値のセルも、書かれた色のまま
+    assert page.eval_on_selector(
+        "table.wbs tbody tr:nth-child(5) td:nth-child(7)",
+        "n => getComputedStyle(n).color") == "rgb(112, 48, 160)"
     assert page.errors == []
 
 

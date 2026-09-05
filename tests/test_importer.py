@@ -602,6 +602,69 @@ def test_cells_without_a_colour_keep_the_usual_one(make_filled, tmp_path):
     assert sheet["E5"].font.color.rgb[-6:] == "000000"    # ほかは黒
 
 
+def test_the_status_column_uses_the_calculated_colour(make_filled, tmp_path):
+    """状態の列だけは例外。文字そのものを計算し直すので、色も計算に合わせる。
+
+    文字色をそのまま使うのは、大項目から担当まで (B〜Q 列)。
+    """
+    from wbsgen.workbook import export
+
+    path = _paint(make_filled("status-color.xlsx"), {"R5": "FF7030A0"})
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["R5"].value == "完了"
+    assert sheet["R5"].font.color.rgb[-6:] != "7030A0"
+
+
+def test_a_derived_value_keeps_the_written_colour(make_filled, tmp_path):
+    """導き出した値のセルでも、記入した文字色から変えない。"""
+    from wbsgen.workbook import export
+
+    path = make_filled("derived-color.xlsx", rows=[
+        # 終了日を書いていないので、日数から補う (= 導出)
+        ("開発", "", "1", "A", dt.date(2026, 4, 1), 10, None,
+         None, None, None, None, None, "", "設計", ""),
+    ])
+    _paint(path, {"H5": "FF7030A0"})
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["H5"].value == dt.datetime(2026, 4, 14)      # 補った値
+    assert sheet["H5"].font.color.rgb == "FF7030A0"           # 色はそのまま
+
+
+def test_no_cell_changes_colour_through_a_round_trip(make_filled, tmp_path):
+    """記入済みの表を通したとき、文字色が変わるセルが 1 つも無いこと。"""
+    from wbsgen.workbook import export
+
+    path = _paint(make_filled("keep-all-colors.xlsx"), {
+        "B5": "FF7030A0", "E5": "FFFF0000", "F5": "FF00B050", "G6": "FF0070C0",
+        "K7": "FFFFC000", "M7": "FF7030A0", "O8": "FF00B0F0", "Q8": "FFFF00FF",
+    })
+    imported = read(path, base_date=BASE)
+    out = export(imported, tmp_path / "out.xlsx", BASE)
+
+    before = openpyxl.load_workbook(path)[SHEET_PLAN]
+    after = openpyxl.load_workbook(out)[SHEET_PLAN]
+
+    def colour(cell):
+        found = cell.font.color
+        if found is None or found.type != "rgb" or not isinstance(found.rgb, str):
+            return None
+        return found.rgb[-6:]                    # 透明度のバイトは見ない
+
+    first = 5                                    # 週単位は見出しのすぐ下から
+    changed = [
+        (before.cell(row=row.row, column=column).coordinate, was, now)
+        for index, row in enumerate(imported.rows)
+        for column in range(2, 18)               # 大項目 (B) 〜 担当 (Q)
+        for was, now in [(colour(before.cell(row=row.row, column=column)),
+                          colour(after.cell(row=first + index, column=column)))]
+        if was != now
+    ]
+    assert changed == []
+
+
 def test_the_colour_survives_two_round_trips(make_filled, tmp_path):
     """書き出したものを読み直しても、色は変わらない。"""
     from wbsgen.workbook import export
