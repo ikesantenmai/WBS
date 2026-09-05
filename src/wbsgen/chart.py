@@ -11,9 +11,10 @@ import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from . import style
-from .i18n import status_kind
+from .i18n import labels as get_labels, status_kind
 from .importer import ImportedWBS, Row, resolve
 from .timeline import Timeline
+from .workload import build as build_workload
 
 #: 画面での状態表示の色 (添付ファイルの配色を、画面で読みやすいように調整)
 STATUS_COLORS = {
@@ -46,7 +47,60 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
         "rows": rows,
         "members": [{"name": name, "color": color} for name, color in colors.items()],
         "totals": _totals(rows),
+        "workload": _workload(imported, calendar, spec.language),
     }
+
+
+def _workload(imported: ImportedWBS, calendar, language: str) -> List[Dict[str, Any]]:
+    """要員稼働チェックを、画面に出せる形にする (Excel のシートと同じ中身)。"""
+    text = get_labels(language)
+    dated = _repeats(months := build_workload(imported.rows, calendar))
+    template = text.load_sheet_dated if dated else text.load_sheet
+    return [
+        {
+            "label": template.format(year=month.year, month=month.month),
+            "title": text.load_title.format(
+                start=_md(month.start), end=_md(month.end, month.start)),
+            "days": [
+                {
+                    "date": day.isoformat(),
+                    "label": f"{day.month}/{day.day}",
+                    "weekday": text.weekdays[day.weekday()],
+                    "working": working,
+                }
+                for day, working in zip(month.days, month.workdays)
+            ],
+            "workdays": month.workday_count,
+            "members": [
+                {
+                    "name": load.name,
+                    "counts": load.counts,
+                    "busy": load.busy_days,
+                    "free": len(load.free_days),
+                    "free_days": ", ".join(
+                        text.load_free_item.format(
+                            month=day.month, day=day.day,
+                            weekday=text.weekdays[day.weekday()])
+                        for day in load.free_days),
+                }
+                for load in month.members
+            ],
+        }
+        for month in months
+    ]
+
+
+def _repeats(months) -> bool:
+    """同じ月が 2 度出てくるか (名前に年を入れるかの判断)。"""
+    seen = [month.month for month in months]
+    return len(seen) != len(set(seen))
+
+
+def _md(day: _dt.date, since: _dt.date = None) -> str:
+    """見出しに出す日付。同じ年なら年を省く。"""
+    if since is not None and since.year == day.year:
+        return f"{day.month}/{day.day}"
+    return f"{day.year}/{day.month}/{day.day}"
 
 
 # ----------------------------------------------------------------------

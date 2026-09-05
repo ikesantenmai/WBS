@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from wbsgen.web.app import app  # noqa: E402
 
+D = dt.date
+
 
 @pytest.fixture
 def client():
@@ -160,6 +162,40 @@ def test_import_returns_a_chart(client, filled_book):
     assert body["timeline"]["unit"] == "week"
     assert body["totals"]["done"] == 2
     assert body["rows"][0]["plan"]["x2"] > body["rows"][0]["plan"]["x1"]
+
+
+def test_import_returns_the_workload_check(client, filled_book):
+    """要員稼働チェックも一緒に返す (画面で切り替えて見られるように)。"""
+    body = _upload(client, filled_book).json()
+    months = body["workload"]
+    assert [m["label"] for m in months] == ["要員稼働チェック_4月",
+                                            "要員稼働チェック_5月",
+                                            "要員稼働チェック_6月",
+                                            "要員稼働チェック_7月",
+                                            "要員稼働チェック_8月"]
+    april = months[0]
+    assert april["title"].startswith("◆要員稼働チェック（2026/4/1")
+    assert april["days"][0] == {"date": "2026-04-01", "label": "4/1",
+                                "weekday": "水", "working": True}
+    assert april["days"][4]["working"] is False          # 4/5 は日曜
+    assert april["workdays"] == 21                       # 昭和の日 4/29 を除く
+    names = [m["name"] for m in april["members"]]
+    assert names == ["設計", "製造", "テスト"]
+    design = april["members"][0]
+    assert design["counts"][0] == 1
+    assert design["busy"] + design["free"] == april["workdays"]
+    # 空き日があるときだけ、その日付を並べる
+    for member in april["members"]:
+        assert bool(member["free_days"]) == (member["free"] > 0)
+    assert any("4/" in member["free_days"] for member in april["members"])
+
+
+def test_the_workload_is_empty_without_owners(client, make_filled):
+    path = make_filled("noowner.xlsx", rows=[
+        ("開発", "", "1", "A", D(2026, 4, 1), 10, D(2026, 4, 14),
+         None, None, None, None, None, "", "", ""),
+    ])
+    assert _upload(client, path).json()["workload"] == []
 
 
 @pytest.mark.parametrize("unit,columns", [("day", 365), ("week", 53), ("month", 12)])

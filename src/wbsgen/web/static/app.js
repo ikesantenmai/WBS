@@ -78,6 +78,22 @@ const UI = {
     preview: 'プレビュー',
     chart: 'ガントチャート',
     chart_unit: '表示単位',
+    view: '表示',
+    view_chart: 'ガントチャート',
+    view_load: '要員稼働チェック',
+    load_month: '月',
+    load_date: '日付',
+    load_weekday: '曜日',
+    load_working: '稼働判定',
+    load_on: '稼',
+    load_off: '休',
+    load_workdays: '稼働日数',
+    load_busy: 'タスク有日数',
+    load_free: '空き日数',
+    load_free_list: '空き日の内訳',
+    load_legend: '凡例：赤=タスク無し（要対応）／緑=1〜2件／橙=3件以上（過負荷の可能性）／灰=非稼働日',
+    load_none: 'このファイルには担当が書かれていないので、稼働チェックは作れません。',
+    load_info: '{start} 〜 {end} / 稼働 {workdays} 日 / 担当 {members} 名',
     columns_shown: '列',
     columns_min: '項目のみ',
     columns_key: '主要な列',
@@ -156,6 +172,22 @@ const UI = {
     preview: 'Preview',
     chart: 'Gantt chart',
     chart_unit: 'Unit',
+    view: 'View',
+    view_chart: 'Gantt chart',
+    view_load: 'Workload check',
+    load_month: 'Month',
+    load_date: 'Date',
+    load_weekday: 'Day',
+    load_working: 'Working',
+    load_on: 'Work',
+    load_off: 'Off',
+    load_workdays: 'Working days',
+    load_busy: 'Days with tasks',
+    load_free: 'Free days',
+    load_free_list: 'Which days are free',
+    load_legend: 'Red = no task (needs attention) / Green = 1-2 / Orange = 3 or more (possibly overloaded) / Grey = non-working day',
+    load_none: 'Nobody is named in this file, so there is no workload check.',
+    load_info: '{start} - {end} / {workdays} working days / {members} people',
     columns_shown: 'Columns',
     columns_min: 'Name only',
     columns_key: 'Key columns',
@@ -227,6 +259,14 @@ const CHART_WIDTH = { day: 22, week: 42, month: 58 };
 //: 読み込んだ WBS を最初に見せるときの表示単位。日ごとの動きが判るよう
 //: 日単位で開く (ファイルの「設定」より優先。上の選択で切り替えられる)。
 const DEFAULT_CHART_UNIT = 'day';
+
+//: 要員稼働チェックの配色 (書き出す Excel と同じ)
+const LOAD_COLORS = {
+  off: '#f2f2f2',          // 非稼働日
+  none: '#ff7c80',         // 稼働日なのにタスク無し
+  ok: '#c6e0b4',           // 1〜2 件
+  heavy: '#ffc000',        // 3 件以上
+};
 const ROW_H = 24;
 const HEAD_H = 24;
 
@@ -245,6 +285,8 @@ let importToken = 0;       // 読み込みの通し番号 (古い応答を捨て
 let pane = 'form';         // 狭い画面でどちらを見せているか ('form' / 'preview')
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
 let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
+let view = 'chart';        // 'chart' = ガントチャート / 'load' = 要員稼働チェック
+let loadMonth = 0;         // 要員稼働チェックで見ている月 (何番目か)
 let busyCount = 0;         // 進行中の読み込み・書き出しの数
 let suggestedTitle = '';   // 提案したプロジェクト名 (書き換えられたか判る)
 
@@ -393,8 +435,13 @@ function scheduleRefresh(delay = 250) {
  * 表 (左・固定) と日程表 (右・SVG) を並べて描く。
  * 記入済みを読み込んだときは日程表にバーが載る。
  */
-function render(view) {
-  lastView = view;
+function render(model) {
+  lastView = model;
+  if (view === 'load') return renderLoad(model);
+  return renderChart(model);
+}
+
+function renderChart(view) {
   const { timeline } = view;
   const colW = CHART_WIDTH[timeline.unit] || 42;
   const withWeekday = timeline.unit === 'day';
@@ -454,6 +501,83 @@ function tableColumns() {
   return TABLE_COLUMNS
     .filter((c) => c.key in set)
     .map((c) => ({ ...c, width: set[c.key] }));
+}
+
+// ---------------------------------------------------- 要員稼働チェック
+/** 読み込んだ WBS の要員稼働チェックを、Excel のシートと同じ形で描く。 */
+function renderLoad(model) {
+  const months = model.workload || [];
+  const parts = [];
+  if (model.warnings && model.warnings.length) parts.push(warningBox(model.warnings));
+
+  if (!months.length) {
+    parts.push(el('p', { class: 'empty-note', text: t('load_none') }));
+    $('#sheet').replaceChildren(...parts);
+    $('#preview-info').textContent = '';
+    renderTotals(null);
+    return;
+  }
+
+  const month = months[Math.min(loadMonth, months.length - 1)];
+  parts.push(el('div', { class: 'sheet-title', text: month.title }));
+  parts.push(loadTable(month));
+  parts.push(el('p', { class: 'note load-legend', text: t('load_legend') }));
+  $('#sheet').replaceChildren(...parts);
+
+  $('#preview-info').textContent = t('load_info', {
+    start: month.days[0].label, end: month.days[month.days.length - 1].label,
+    workdays: month.workdays, members: month.members.length,
+  });
+  renderTotals(null);
+}
+
+function loadTable(month) {
+  const head = el('thead');
+  const rows = [
+    ['load_date', month.days.map((d) => [d.label, 'head'])],
+    ['load_weekday', month.days.map((d) => [d.weekday, d.working ? 'head' : 'head rest'])],
+    ['load_working', month.days.map((d) => [t(d.working ? 'load_on' : 'load_off'),
+                                            d.working ? 'head' : 'head rest'])],
+  ];
+  rows.forEach(([key, cells], index) => {
+    const tr = el('tr', {}, el('th', { class: 'load-name head', text: t(key) }));
+    for (const [text_, cls] of cells) tr.append(el('th', { class: cls, text: text_ }));
+    // 集計の見出しは 1 行目にだけ置き、下の 2 行は縦に伸ばす
+    if (index === 0) {
+      for (const label of ['load_workdays', 'load_busy', 'load_free', 'load_free_list']) {
+        tr.append(el('th', { class: 'head total', rowspan: 3, text: t(label) }));
+      }
+    }
+    head.append(tr);
+  });
+
+  const body = el('tbody');
+  for (const member of month.members) {
+    const tr = el('tr', {}, el('td', { class: 'load-name', text: member.name }));
+    member.counts.forEach((count, i) => {
+      const day = month.days[i];
+      tr.append(el('td', {
+        text: count ? String(count) : '',
+        style: `background:${loadColor(count, day.working)}`,
+      }));
+    });
+    tr.append(el('td', { class: 'total', text: String(month.workdays) }));
+    tr.append(el('td', { class: 'total', text: String(member.busy) }));
+    tr.append(el('td', {
+      class: 'total',
+      text: String(member.free),
+      style: member.free ? `background:${LOAD_COLORS.none}` : '',
+    }));
+    tr.append(el('td', { class: 'total free-days', text: member.free_days }));
+    body.append(tr);
+  }
+  return el('table', { class: 'wbs load' }, head, body);
+}
+
+function loadColor(count, working) {
+  if (!working) return LOAD_COLORS.off;
+  if (!count) return LOAD_COLORS.none;
+  return count >= 3 ? LOAD_COLORS.heavy : LOAD_COLORS.ok;
 }
 
 function warningBox(warnings) {
@@ -764,6 +888,7 @@ async function importBytes(name, bytes, unit = null, announce = false) {
     // 待っている間に「戻る」や別の読み込みが起きていたら、この結果は捨てる
     if (token !== importToken) return;
     loaded = { name, bytes };
+    fillMonths(model.workload || []);
     setMode('chart');
     $('#chart-unit').value = model.timeline.unit;
     render({
@@ -774,6 +899,7 @@ async function importBytes(name, bytes, unit = null, announce = false) {
       nowX: model.now_x,
       totals: model.totals,
       warnings: model.warnings,
+      workload: model.workload || [],
       info: t('info_chart', {
         start: model.timeline.start, end: model.timeline.end,
         columns: model.timeline.columns.length, rows: model.rows.length,
@@ -798,14 +924,35 @@ function setMode(next) {
     $(id).hidden = chart;
   }
   document.querySelector('.layout').classList.toggle('chart-mode', chart);
-  $('#chart-unit-field').hidden = !chart;
+  if (!chart) view = 'chart';
+  $('#view-field').hidden = !chart;
+  applyView();
   $('#btn-back').hidden = !chart;
   $('#btn-export').hidden = !chart;
   $('#btn-build').hidden = chart;
   $('#preview-title').textContent = t(chart ? 'chart' : 'preview');
   $('#preview-hint').textContent = t(chart ? 'hint_chart' : 'hint_blank');
   $('#tagline').textContent = t(chart ? 'tagline_chart' : 'tagline_blank');
+}
+
+/** ガントチャートと要員稼働チェックで、出す道具立てを入れ替える。 */
+/** 要員稼働チェックの月の選択肢を作り直す。 */
+function fillMonths(months) {
+  if (loadMonth >= months.length) loadMonth = 0;
+  $('#load-month').replaceChildren(...months.map(
+    (month, index) => el('option', { value: String(index), text: month.label })));
+  $('#load-month').value = String(loadMonth);
+  $('#view').disabled = months.length === 0;
+}
+
+function applyView() {
+  const chart = mode === 'chart';
+  const load = chart && view === 'load';
+  $('#view').value = view;          // 「戻る」でガントチャートに戻したときも合わせる
+  $('#chart-unit-field').hidden = !chart || load;
+  $('#load-month-field').hidden = !load;
   applyNarrow();
+  $('#preview-title').textContent = t(load ? 'view_load' : (chart ? 'chart' : 'preview'));
 }
 
 // ------------------------------------------------------ スマートフォン向け
@@ -817,7 +964,8 @@ function applyNarrow() {
   const narrow = isNarrow();
   const tabs = isPhone() && mode === 'blank';
   $('#pane-tabs').hidden = !tabs;
-  $('#columns-field').hidden = !narrow;
+  // 列の選択はガントチャートの表のためのもの (稼働チェックには効かない)
+  $('#columns-field').hidden = !narrow || view === 'load';
 
   const layout = document.querySelector('.layout');
   layout.classList.toggle('pane-form', tabs && pane === 'form');
@@ -894,6 +1042,9 @@ function fillChoices() {
   $('#unit').value = unit;
   $('#chart-unit').replaceChildren(...options());
   $('#chart-unit').value = chartUnit;
+  $('#view').replaceChildren(...['chart', 'load'].map(
+    (v) => el('option', { value: v, text: t(`view_${v}`) })));
+  $('#view').value = view;
   $('#columns-mode').replaceChildren(...COLUMN_MODES.map(
     (m) => el('option', { value: m, text: t(`columns_${m}`) })));
   $('#columns-mode').value = columnsMode;
@@ -953,6 +1104,15 @@ function bind() {
     setMode('blank');
     banner('');
     refresh();
+  });
+  $('#view').addEventListener('change', (event) => {
+    view = event.target.value;
+    applyView();
+    redraw();
+  });
+  $('#load-month').addEventListener('change', (event) => {
+    loadMonth = Number(event.target.value) || 0;
+    redraw();
   });
   $('#chart-unit').addEventListener('change', () => {
     if (loaded) importBytes(loaded.name, loaded.bytes, $('#chart-unit').value);

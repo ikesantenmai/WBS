@@ -524,6 +524,73 @@ def test_building_a_blank_wbs_shows_what_is_happening(page):
     assert page.errors == []
 
 
+# ---------------------------------------------------------- 要員稼働チェック
+def _load_view(page, book):
+    """読み込んで、要員稼働チェックに切り替える。
+
+    直前のテストが稼働チェックのままにしていることがあるので、
+    まずガントチャートに戻してから読み込む。
+    """
+    if page.eval_on_selector("#view", "n => n.value") == "load":
+        page.select_option("#view", "chart")
+    page.set_input_files("#import-file", str(book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+    page.select_option("#view", "load")
+    page.wait_for_selector("table.wbs.load")
+    # 月の選択も前のテストから引き継がれるので、先頭に戻しておく
+    page.select_option("#load-month", "0")
+    page.wait_for_selector("table.wbs.load")
+
+
+def test_the_workload_check_can_be_shown(page, filled_book):
+    """読み込んだあと、要員稼働チェックに切り替えて見られる。"""
+    _load_view(page, filled_book)
+
+    assert page.text_content(".sheet-title").startswith("◆要員稼働チェック")
+    assert [row for row in page.eval_on_selector_all(
+        "table.wbs.load tbody td.load-name", "n => n.map(x => x.textContent)")] == \
+        ["設計", "製造", "テスト"]
+    # 日付・曜日・稼働判定の 3 行
+    assert page.eval_on_selector_all("table.wbs.load thead tr", "n => n.length") == 3
+    assert page.is_visible("#load-month-field")
+    assert page.is_hidden("#chart-unit-field")
+    assert page.errors == []
+
+
+def test_the_workload_month_can_be_switched(page, filled_book):
+    _load_view(page, filled_book)
+
+    months = page.eval_on_selector_all("#load-month option", "n => n.map(x => x.value)")
+    assert len(months) >= 2
+    page.select_option("#load-month", months[1])
+    page.wait_for_function(
+        "() => document.querySelector('.sheet-title').textContent.includes('5/')")
+    assert page.errors == []
+
+
+def test_the_workload_cells_are_coloured_like_the_sheet(page, filled_book):
+    """色は書き出す Excel と同じ (灰=非稼働 / 赤=0 件 / 緑=1〜2 / 橙=3 以上)。"""
+    _load_view(page, filled_book)
+
+    seen = set(page.eval_on_selector_all(
+        "table.wbs.load tbody td:not(.load-name):not(.total)",
+        "n => n.map(x => getComputedStyle(x).backgroundColor)"))
+    assert "rgb(242, 242, 242)" in seen        # 非稼働日
+    assert "rgb(255, 124, 128)" in seen        # タスク無し
+    assert "rgb(198, 224, 180)" in seen        # 1〜2 件
+
+
+def test_going_back_to_the_chart_restores_the_gantt(page, filled_book):
+    _load_view(page, filled_book)
+
+    page.select_option("#view", "chart")
+    page.wait_for_selector("svg.chart-body")
+    assert page.is_visible("#chart-unit-field")
+    assert page.is_hidden("#load-month-field")
+    assert page.errors == []
+
+
 # ------------------------------------------------ スマートフォン (狭い画面)
 def _phone_reset(phone):
     """新規作成の指定タブに戻す。"""

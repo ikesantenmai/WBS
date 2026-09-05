@@ -371,6 +371,12 @@ period and totals round-trip.
 
 ### The workload check
 
+**It is on screen too.** After importing, set **View** to "Workload check" and
+the same table as the exported sheet appears (dates, weekdays, working days,
+the per-person counts and the totals on the right). **Month** switches between
+months. The colours match, and the name column stays pinned as you swipe
+sideways.
+
 The exported file carries a **workload sheet for each month**. It counts, day
 by day, the planned periods of every row whose Owner column names the person,
 so you can see at a glance who is free and who is stacked up.
