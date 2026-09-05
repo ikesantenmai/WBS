@@ -715,6 +715,83 @@ def test_no_cell_changes_colour_through_a_round_trip(make_filled, tmp_path):
     assert changed == []
 
 
+# ---------------------------------------------------------------- 背景色
+def _shade(path, cells, sheet=SHEET_PLAN):
+    book = openpyxl.load_workbook(path)
+    target = book[sheet]
+    for coordinate, color in cells.items():
+        target[coordinate].fill = openpyxl.styles.PatternFill(
+            "solid", fgColor=color)
+    book.save(path)
+    return path
+
+
+def test_the_background_of_each_cell_is_read(make_filled):
+    path = _shade(make_filled("bg.xlsx"), {"E5": "FFFFFF00", "Q6": "FFCCFFCC"})
+    rows = read(path, base_date=BASE).rows
+    assert rows[0].paper["name"] == "FFFF00"
+    assert rows[1].paper["member"] == "CCFFCC"
+
+
+def test_the_background_survives_the_export(make_filled, tmp_path):
+    """読み込んだ背景色を、書き出しで塗り替えない。"""
+    from wbsgen.workbook import export
+
+    path = _shade(make_filled("bg2.xlsx"), {"E5": "FFFFFF00", "F5": "FFCCFFCC"})
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["E5"].fill.fgColor.rgb == "FFFFFF00"
+    assert sheet["F5"].fill.fgColor.rgb == "FFCCFFCC"      # 予定の薄黄より優先
+
+
+def test_an_unpainted_cell_stays_unpainted(make_filled, tmp_path):
+    from wbsgen.workbook import export
+
+    path = make_filled("bg3.xlsx")
+    book = openpyxl.load_workbook(path)
+    for coordinate in ("E5", "F5"):
+        book[SHEET_PLAN][coordinate].fill = openpyxl.styles.PatternFill()
+    book.save(path)
+
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["E5"].fill.patternType is None
+    assert sheet["F5"].fill.patternType is None
+
+
+def test_no_cell_changes_background_through_a_round_trip(make_filled, tmp_path):
+    """記入済みの表を通したとき、背景色が変わるセルが 1 つも無いこと。"""
+    from wbsgen.workbook import export
+
+    path = _shade(make_filled("bg4.xlsx"), {
+        "B5": "FFFFFF00", "E5": "FFFFFF00", "F5": "FFFFFF00", "G6": "FFCCFFCC",
+        "K7": "FFFFCCCC", "Q8": "FFCCCCFF",
+    })
+    imported = read(path, base_date=BASE)
+    out = export(imported, tmp_path / "out.xlsx", BASE)
+
+    before = openpyxl.load_workbook(path)[SHEET_PLAN]
+    after = openpyxl.load_workbook(out)[SHEET_PLAN]
+
+    def paint(cell):
+        found = cell.fill
+        if not found.patternType:
+            return None
+        return (found.patternType, found.fgColor.type,
+                found.fgColor.rgb if found.fgColor.type == "rgb" else None)
+
+    changed = [
+        (before.cell(row=row.row, column=column).coordinate, was, now)
+        for index, row in enumerate(imported.rows)
+        for column in range(2, 18)               # 大項目 (B) 〜 担当 (Q)
+        for was, now in [(paint(before.cell(row=row.row, column=column)),
+                          paint(after.cell(row=5 + index, column=column)))]
+        if was != now
+    ]
+    assert changed == []
+
+
 def test_the_colour_survives_two_round_trips(make_filled, tmp_path):
     """書き出したものを読み直しても、色は変わらない。"""
     from wbsgen.workbook import export

@@ -126,6 +126,10 @@ class Row:
     #: 上を画面用の色に直したもの (属性名 -> ``RRGGBB``)。
     #: テーマ色や色番号も、ここで RGB に直してある。
     ink: Dict[str, str] = field(default_factory=dict)
+    #: セルの背景 (属性名 -> openpyxl の塗り / 塗りなしは None)
+    fills: Dict[str, Any] = field(default_factory=dict)
+    #: 上を画面用の色に直したもの (属性名 -> ``RRGGBB``)
+    paper: Dict[str, str] = field(default_factory=dict)
     #: 記入内容から導き出した項目の名前 (画面で薄く見せるため)
     derived: set = field(default_factory=set)
     #: セルに書かれていた値。導出をやり直せるように控えておく。
@@ -617,10 +621,13 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str,
         row.effort = cell("effort", _number)
         # 導出をやり直せるよう、書かれていた値を控える
         row.written = {key: getattr(row, key) for key in WRITTEN_FIELDS}
-        # 文字色は書き出しでそのまま戻すので、ここで控えておく
+        # 文字色と背景は書き出しでそのまま戻すので、ここで控えておく
         row.colors = _cell_colors(sheet, index, columns)
         row.ink = {key: rgb for key, color in row.colors.items()
                    for rgb in [to_rgb(color, theme)] if rgb}
+        row.fills = _cell_fills(sheet, index, columns)
+        row.paper = {key: rgb for key, fill in row.fills.items()
+                     for rgb in [to_rgb(_fill_color(fill), theme)] if rgb}
 
         # 項目名も予定も無い行でも、実績が入っていれば残す
         # (実績の終了日だけを記録してある行を落とさないため)
@@ -655,6 +662,27 @@ def _cell_colors(sheet, index: int, columns: Dict[str, int]) -> Dict[str, Any]:
         color = sheet.cell(row=index, column=column).font.color
         out[key] = copy(color) if color is not None else None
     return out
+
+
+def _cell_fills(sheet, index: int, columns: Dict[str, int]) -> Dict[str, Any]:
+    """その行のセルの背景を、そのまま控える (大項目〜担当)。
+
+    塗っていないセルは ``None`` を控える (書き出しでも塗らない)。
+    """
+    out: Dict[str, Any] = {}
+    for key, column in columns.items():
+        if key in COLOR_SKIP:
+            continue
+        fill = sheet.cell(row=index, column=column).fill
+        out[key] = copy(fill) if fill is not None and fill.patternType else None
+    return out
+
+
+def _fill_color(fill):
+    """塗りの色 (画面用)。ベタ塗り以外は色を決めない。"""
+    if fill is None or fill.patternType != "solid":
+        return None
+    return fill.fgColor
 
 
 # ----------------------------------------------------------------------

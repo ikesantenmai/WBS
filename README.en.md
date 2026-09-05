@@ -240,9 +240,14 @@ Excel stores colours as plain RGB, as an **indexed** palette entry, or as a
 three are kept**: the export writes the colour back exactly as it was specified,
 and the screen resolves it against the workbook's theme (tints included).
 
+**Background colours are treated the same way.** A row you highlighted in
+yellow stays highlighted, on screen and in the exported file; a cell with no
+fill is left unfilled.
+
 **A cell with no colour of its own is left without one** (Excel's "automatic").
-The usual colours — navy for planned dates, black elsewhere — are applied only
-to a newly created blank WBS and to rows that were not filled in.
+The usual colours — navy text on pale yellow for planned dates, black on white
+elsewhere — are applied only to a newly created blank WBS and to rows that were
+not filled in.
 
 The Status column is the one exception: the tool recalculates its text, so its
 colour follows what was calculated (done grey, delayed pink, remaining orange,

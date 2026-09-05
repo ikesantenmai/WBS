@@ -530,9 +530,12 @@ function tableCell(row, column, previous) {
     td.classList.add('derived');
     td.title = t(`derived_${column.key}`);
   }
-  // セルに指定されていた文字色は、導き出した値でもそのまま見せる
+  // セルに指定されていた文字色・背景は、導き出した値でもそのまま見せる
   if (row.colors && row.colors[column.key]) {
     td.style.color = row.colors[column.key];
+  }
+  if (row.fills && row.fills[column.key]) {
+    td.style.background = row.fills[column.key];
   }
   return td;
 }

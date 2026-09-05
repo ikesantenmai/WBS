@@ -391,7 +391,7 @@ def test_the_indent_in_a_task_name_is_shown(page, make_filled):
 
 
 def test_the_font_colour_is_shown_as_written(page, make_filled):
-    """記入した文字色は、画面でもそのまま見せる。"""
+    """記入した文字色と背景色は、画面でもそのまま見せる。"""
     book = make_filled("color-ui.xlsx")
     import openpyxl
     from wbsgen.workbook import SHEET_PLAN
@@ -401,6 +401,8 @@ def test_the_font_colour_is_shown_as_written(page, make_filled):
         cell = wb[SHEET_PLAN][coordinate]
         cell.font = openpyxl.styles.Font(name=cell.font.name, size=cell.font.sz,
                                          color=colour)
+    wb[SHEET_PLAN]["E6"].fill = openpyxl.styles.PatternFill(
+        "solid", fgColor="FFFFFF00")               # 背景を黄色にした行
     wb.save(book)
 
     page.set_input_files("#import-file", str(book))
@@ -413,6 +415,10 @@ def test_the_font_colour_is_shown_as_written(page, make_filled):
     assert page.eval_on_selector(
         "table.wbs tbody tr:nth-child(5) td:nth-child(7)",
         "n => getComputedStyle(n).color") == "rgb(112, 48, 160)"
+    # 背景色もそのまま出す
+    assert page.eval_on_selector(
+        "table.wbs tbody tr:nth-child(2) td.name",
+        "n => getComputedStyle(n).backgroundColor") == "rgb(255, 255, 0)"
     assert page.errors == []
 
 

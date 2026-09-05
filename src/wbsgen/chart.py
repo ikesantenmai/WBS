@@ -106,6 +106,8 @@ def _row(row: Row, timeline: Timeline, colors) -> Dict[str, Any]:
         # セルに指定されていた文字色 (画面でもそのまま見せる)。
         # RGB のほか、色番号やテーマ色も画面用の色に直してある。
         "colors": {key: "#" + rgb for key, rgb in row.ink.items()},
+        # セルの背景も、書かれていたものをそのまま見せる
+        "fills": {key: "#" + rgb for key, rgb in row.paper.items()},
         "delay": row.delay,
         "progress": row.progress,
         "effort": row.effort,

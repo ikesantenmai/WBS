@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import io
+from copy import copy
 from pathlib import Path
 from typing import Dict, List
 
@@ -419,13 +420,18 @@ class _Writer:
         (読み込んだ色を、書き出しで既定色に変えてしまわないため)。
         """
         written = getattr(source, "colors", None) or {}
+        painted = getattr(source, "fills", None) or {}
         for letter in TABLE_LETTERS:
             cell = ws[f"{letter}{row}"]
-            cell.fill = style.fill(
-                style.C_PLAN_CELL if letter in PLAN_COLUMNS else style.C_WHITE)
             cell.border = style.BORDER_CELL
             key = COLUMN_KEYS[letter]
-            # 読み込んだセルの文字色は、色なし (自動) も含めてそのまま使う
+            # 読み込んだセルの文字色と背景は、指定なしも含めてそのまま使う
+            if key in painted:
+                if painted[key] is not None:
+                    cell.fill = copy(painted[key])
+            else:
+                cell.fill = style.fill(
+                    style.C_PLAN_CELL if letter in PLAN_COLUMNS else style.C_WHITE)
             color = (written[key] if key in written else
                      (style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000"))
             cell.font = style.font(color=color)
