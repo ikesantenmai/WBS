@@ -233,8 +233,16 @@ match, the first sheet with a Task column is used.
 file.** A colour set on a cell (a task name in red, an owner in blue) is
 recorded on import and used as it is, both on screen and in the exported file —
 **including derived values** such as an end date filled in from the number of
-days. Only cells with no colour of their own get the usual one (navy for
-planned dates, black elsewhere).
+days.
+
+Excel stores colours as plain RGB, as an **indexed** palette entry, or as a
+**theme** colour, depending on which row of the colour picker was used. **All
+three are kept**: the export writes the colour back exactly as it was specified,
+and the screen resolves it against the workbook's theme (tints included).
+
+**A cell with no colour of its own is left without one** (Excel's "automatic").
+The usual colours — navy for planned dates, black elsewhere — are applied only
+to a newly created blank WBS and to rows that were not filled in.
 
 The Status column is the one exception: the tool recalculates its text, so its
 colour follows what was calculated (done grey, delayed pink, remaining orange,
@@ -433,6 +441,7 @@ src/wbsgen/
   blank.py       the sheet spec (period, unit, blank rows, working days, language)
   timeline.py    the calendar axis and its two-row heading
   workcal.py     working-day rules and Japanese public holidays
+  palette.py     resolving Excel colours (RGB, indexed, theme) for the screen
   workload.py    the workload check per member
   style.py       colours and formats (taken from the original file)
   workbook.py    writing Excel

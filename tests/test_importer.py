@@ -572,9 +572,59 @@ def test_the_font_colour_of_each_cell_is_read(make_filled):
     path = _paint(make_filled("color.xlsx"),
                   {"E5": "FFFF0000", "Q6": "FF0070C0", "F7": "FF00B050"})
     rows = read(path, base_date=BASE).rows
-    assert rows[0].colors["name"] == "FFFF0000"
-    assert rows[1].colors["member"] == "FF0070C0"
-    assert rows[2].colors["start"] == "FF00B050"
+    assert rows[0].colors["name"].rgb == "FFFF0000"
+    assert rows[1].colors["member"].rgb == "FF0070C0"
+    assert rows[2].colors["start"].rgb == "FF00B050"
+    # 画面用に RRGGBB にも直してある
+    assert rows[0].ink["name"] == "FF0000"
+
+
+def test_indexed_and_theme_colours_are_kept_too(make_filled, tmp_path):
+    """色番号やテーマ色で指定された文字色も、そのまま残す。
+
+    Excel の色の選択では、段によって RGB ではなくテーマ色や色番号で
+    保存される。RGB だけを見ていると、赤が黒に変わってしまう。
+    """
+    from openpyxl.styles.colors import Color
+
+    from wbsgen.workbook import export
+
+    path = make_filled("kinds.xlsx")
+    book = openpyxl.load_workbook(path)
+    sheet = book[SHEET_PLAN]
+    for coordinate, color in (("E5", Color(indexed=10)),        # 色番号の赤
+                              ("E6", Color(theme=4))):          # テーマ色
+        font = sheet[coordinate].font
+        sheet[coordinate].font = openpyxl.styles.Font(
+            name=font.name, size=font.sz, color=color)
+    book.save(path)
+
+    rows = read(path, base_date=BASE).rows
+    assert rows[0].ink["name"] == "FF0000"          # 画面では赤になる
+    assert rows[1].ink["name"]                      # テーマ色も色が決まる
+
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["E5"].font.color.indexed == 10     # 指定のしかたごと残す
+    assert sheet["E6"].font.color.theme == 4
+
+
+def test_a_cell_with_no_colour_stays_without_one(make_filled, tmp_path):
+    """色を指定していないセルには、書き出しでも色を付けない (自動のまま)。"""
+    from wbsgen.workbook import export
+
+    path = make_filled("nocolor.xlsx")
+    book = openpyxl.load_workbook(path)
+    sheet = book[SHEET_PLAN]
+    for coordinate in ("E5", "F5"):
+        font = sheet[coordinate].font
+        sheet[coordinate].font = openpyxl.styles.Font(name=font.name, size=font.sz)
+    book.save(path)
+
+    out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
+    sheet = openpyxl.load_workbook(out)[SHEET_PLAN]
+    assert sheet["E5"].font.color is None
+    assert sheet["F5"].font.color is None           # 予定の紺も付けない
 
 
 def test_the_font_colour_survives_the_export(make_filled, tmp_path):

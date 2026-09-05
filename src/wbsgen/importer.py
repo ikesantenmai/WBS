@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import unicodedata as _unicodedata
+from copy import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,7 @@ from openpyxl import load_workbook
 
 from .blank import MAX_ROWS, BlankWBS, SpecError
 from .i18n import DEFAULT_LANGUAGE, LABELS, labels, message, normalize
+from .palette import theme_colors, to_rgb
 from .timeline import UNIT_DAY, UNIT_WEEK, VALID_UNITS
 from .workcal import WEEKDAY_KEYS
 
@@ -118,8 +120,12 @@ class Row:
     predecessor: str = ""
     member: str = ""
     status: str = ""
-    #: セルに指定されていた文字色 (属性名 -> ARGB)。書き出しでそのまま戻す。
-    colors: Dict[str, str] = field(default_factory=dict)
+    #: セルの文字色そのもの (属性名 -> openpyxl の色 / 色なしは None)。
+    #: 書き出しではこれをそのまま書き戻す。
+    colors: Dict[str, Any] = field(default_factory=dict)
+    #: 上を画面用の色に直したもの (属性名 -> ``RRGGBB``)。
+    #: テーマ色や色番号も、ここで RGB に直してある。
+    ink: Dict[str, str] = field(default_factory=dict)
     #: 記入内容から導き出した項目の名前 (画面で薄く見せるため)
     derived: set = field(default_factory=set)
     #: セルに書かれていた値。導出をやり直せるように控えておく。
@@ -179,7 +185,8 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
 
     config = _read_config(book)
     first_row = header_row + (2 if config.get("unit") == UNIT_DAY else 1)
-    rows, warnings = _read_rows(sheet, first_row, columns, lang)
+    rows, warnings = _read_rows(sheet, first_row, columns, lang,
+                                theme_colors(book))
     warnings = (_missing_column_warnings(columns, lang)
                 + _formula_warnings(source, sheet.title, columns, rows, lang)
                 + warnings)
@@ -552,7 +559,8 @@ def _merged_values(sheet) -> Dict[tuple, object]:
     return out
 
 
-def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
+def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str,
+               theme: List[str] = ()):
     """記入された行を読む。空行は飛ばす。
 
     読めないセルがあっても行は捨てず、その項目だけ空にして注意書きに残す
@@ -611,6 +619,8 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
         row.written = {key: getattr(row, key) for key in WRITTEN_FIELDS}
         # 文字色は書き出しでそのまま戻すので、ここで控えておく
         row.colors = _cell_colors(sheet, index, columns)
+        row.ink = {key: rgb for key, color in row.colors.items()
+                   for rgb in [to_rgb(color, theme)] if rgb}
 
         # 項目名も予定も無い行でも、実績が入っていれば残す
         # (実績の終了日だけを記録してある行を落とさないため)
@@ -628,20 +638,22 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str):
 COLOR_SKIP = frozenset({"status"})
 
 
-def _cell_colors(sheet, index: int, columns: Dict[str, int]) -> Dict[str, str]:
-    """その行のセルに指定されている文字色を控える (大項目〜担当)。
+def _cell_colors(sheet, index: int, columns: Dict[str, int]) -> Dict[str, Any]:
+    """その行のセルの文字色を、そのまま控える (大項目〜担当)。
 
     書き出しでは表を作り直すので、控えておかないと記入した文字色が
     このツールの既定色 (予定は紺、ほかは黒) に置き換わってしまう。
-    テーマ色や色番号は書き戻せないので、RGB で指定されたものだけを見る。
+
+    RGB だけでなくテーマ色・色番号も、openpyxl の色をそのまま持って
+    書き戻す。色を指定していないセルは ``None`` を控える (書き出しでも
+    色を指定しない = Excel の「自動」のまま)。
     """
-    out: Dict[str, str] = {}
+    out: Dict[str, Any] = {}
     for key, column in columns.items():
         if key in COLOR_SKIP:
             continue
         color = sheet.cell(row=index, column=column).font.color
-        if color is not None and color.type == "rgb" and isinstance(color.rgb, str):
-            out[key] = color.rgb
+        out[key] = copy(color) if color is not None else None
     return out
 
 

@@ -424,8 +424,10 @@ class _Writer:
             cell.fill = style.fill(
                 style.C_PLAN_CELL if letter in PLAN_COLUMNS else style.C_WHITE)
             cell.border = style.BORDER_CELL
-            color = written.get(COLUMN_KEYS[letter]) or (
-                style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000")
+            key = COLUMN_KEYS[letter]
+            # 読み込んだセルの文字色は、色なし (自動) も含めてそのまま使う
+            color = (written[key] if key in written else
+                     (style.C_PLAN_FONT if letter in PLAN_COLUMNS else "000000"))
             cell.font = style.font(color=color)
             cell.alignment = style.ALIGN_CENTER
             number_format = self._cell_format(letter)

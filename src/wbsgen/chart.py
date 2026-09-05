@@ -103,8 +103,9 @@ def _row(row: Row, timeline: Timeline, colors) -> Dict[str, Any]:
         "actual_end": _iso(row.actual_end),
         # 記入内容から導き出した項目 (画面で薄く見せる)
         "derived": sorted(row.derived),
-        # セルに指定されていた文字色 (画面でもそのまま見せる)
-        "colors": {key: "#" + value[-6:] for key, value in row.colors.items()},
+        # セルに指定されていた文字色 (画面でもそのまま見せる)。
+        # RGB のほか、色番号やテーマ色も画面用の色に直してある。
+        "colors": {key: "#" + rgb for key, rgb in row.ink.items()},
         "delay": row.delay,
         "progress": row.progress,
         "effort": row.effort,
