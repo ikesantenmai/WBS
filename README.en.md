@@ -147,6 +147,10 @@ wbsgen serve                       # http://127.0.0.1:8000
 wbsgen serve --host 0.0.0.0 --port 8080
 ```
 
+The **running version** is shown at the top of the page (`wbsgen 2.1.0`). Check
+it there, or in `version` from `/api/meta`, to tell whether a deployment picked
+up the latest build.
+
 ### Creating an empty WBS
 
 The period, sheet and working-day settings are on the left; a preview with

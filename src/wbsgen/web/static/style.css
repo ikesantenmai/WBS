@@ -49,6 +49,8 @@ body { display: flex; flex-direction: column; }
   min-width: 0; font-size: 12px; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 動いている版。入れ替えたかどうかを画面で確かめられるように出す。 */
+.version { flex: none; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .spacer { flex: 1 1 auto; }
 .lang-select {
   padding: 7px 8px; font: inherit; font-size: 12px;
@@ -246,7 +248,7 @@ table.wbs td.chart { border-right-color: var(--line-soft); border-bottom-color: 
   /* 上のバー: 題名で 1 行、操作ボタンで次の行 */
   .topbar { flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
   .topbar h1 { font-size: 14px; }
-  .tagline { display: none; }
+  .tagline, .version { display: none; }
   .spacer { flex: 0 0 100%; height: 0; }
   .topbar .btn { flex: 1 1 auto; min-height: 42px; }
   .lang-select { min-height: 42px; }

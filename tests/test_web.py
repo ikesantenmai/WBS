@@ -41,6 +41,9 @@ def test_meta_offers_the_choices(client):
     # 既定は年度 (4 月始まり)
     assert body["suggested"]["start"].endswith("-04-01")
     assert body["suggested"]["end"].endswith("-03-31")
+    # 動いている版 (入れ替えたかどうかを画面で確かめられるように返す)
+    from wbsgen import __version__
+    assert body["version"] == __version__
 
 
 # ---------------------------------------------------------------- preview

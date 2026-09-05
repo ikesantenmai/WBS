@@ -390,6 +390,13 @@ def test_the_indent_in_a_task_name_is_shown(page, make_filled):
 
 
 
+def test_the_running_version_is_shown(page):
+    """動いている版を画面に出す (入れ替えたかどうかが判るように)。"""
+    from wbsgen import __version__
+
+    assert page.text_content("#version") == f"wbsgen {__version__}"
+
+
 def test_the_font_colour_is_shown_as_written(page, make_filled):
     """記入した文字色と背景色は、画面でもそのまま見せる。"""
     book = make_filled("color-ui.xlsx")

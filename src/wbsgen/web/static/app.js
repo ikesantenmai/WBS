@@ -1039,6 +1039,7 @@ async function start() {
     banner(t('cannot_start', { reason: error.message }));
     return;
   }
+  $('#version').textContent = meta.version ? `wbsgen ${meta.version}` : '';
   $('#language').replaceChildren(...meta.languages.map(
     (l) => el('option', { value: l.value, text: l.label })));
   $('#language').value = language;
