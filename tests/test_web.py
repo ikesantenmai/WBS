@@ -30,13 +30,34 @@ def test_index_serves_the_app_shell(client):
     assert "/static/app.js" in response.text
 
 
-def test_the_assets_carry_the_version(client):
-    """入れ替えたあとに前の版が使われないよう、読み込みに版を付ける。"""
-    from wbsgen import __version__
+def test_the_assets_carry_a_stamp(client):
+    """入れ替えたあとに前の版が使われないよう、読み込みに印を付ける。"""
+    import re
 
     text = client.get("/").text
-    assert f"/static/app.js?v={__version__}" in text
-    assert f"/static/style.css?v={__version__}" in text
+    assert re.search(r"/static/app\.js\?v=[0-9a-f]{8}", text)
+    assert re.search(r"/static/style\.css\?v=[0-9a-f]{8}", text)
+
+
+def test_the_stamp_follows_the_contents(client):
+    """印は中身から作る。版番号だと、上げ忘れたときに切り替わらない。"""
+    import re
+
+    from wbsgen.web.app import STATIC_DIR
+
+    def stamp():
+        found = re.search(r"/static/app\.js\?v=([0-9a-f]{8})", client.get("/").text)
+        return found.group(1)
+
+    path = STATIC_DIR / "app.js"
+    before = path.read_bytes()
+    was = stamp()
+    try:
+        path.write_bytes(before + b"\n// changed\n")
+        assert stamp() != was
+    finally:
+        path.write_bytes(before)
+    assert stamp() == was
 
 
 def test_the_page_itself_is_never_cached(client):

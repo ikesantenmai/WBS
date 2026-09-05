@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import io
 import tempfile
 from pathlib import Path
@@ -237,16 +238,25 @@ async def export_workbook(
 def index() -> HTMLResponse:
     """トップページ。
 
-    JavaScript と CSS の読み込みに版を付ける。付けないと、入れ替えた
-    あともブラウザが前の版を使い続けてしまう。ページ自体は毎回
-    取り直させる (版を書き換えるのはこのページなので)。
+    JavaScript と CSS の読み込みに、**中身から作った印**を付ける。
+    版番号だと上げ忘れたときに前の版が使われ続けるので、中身が変われば
+    必ず変わるものにしてある。ページ自体は毎回取り直させる。
     """
     page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     for asset in ("app.js", "style.css"):
-        page = page.replace(f"/static/{asset}", f"/static/{asset}?v={__version__}")
+        page = page.replace(f"/static/{asset}", f"/static/{asset}?v={_stamp(asset)}")
     return HTMLResponse(page, headers={
         "Cache-Control": "no-cache, no-store, must-revalidate",
     })
+
+
+def _stamp(asset: str) -> str:
+    """静的ファイルの中身から作る短い印 (キャッシュを切り替えるため)。"""
+    try:
+        digest = hashlib.sha256((STATIC_DIR / asset).read_bytes()).hexdigest()
+    except OSError:
+        return __version__
+    return digest[:8]
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

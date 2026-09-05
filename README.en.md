@@ -147,13 +147,14 @@ wbsgen serve                       # http://127.0.0.1:8000
 wbsgen serve --host 0.0.0.0 --port 8080
 ```
 
-The **running version** is shown at the top of the page (`wbsgen 2.1.0`). Check
+The **running version** is shown at the top of the page (`wbsgen 2.2.0`). Check
 it there, or in `version` from `/api/meta`, to tell whether a deployment picked
 up the latest build.
 
-The JavaScript and CSS are loaded with the version attached
-(`app.js?v=2.1.0`), so a browser never keeps serving the previous build after a
-deployment. The page itself is not cached either.
+The JavaScript and CSS are loaded with a **stamp taken from their contents**
+(`app.js?v=63dae2ae`). The stamp changes whenever the file does, so a browser
+never keeps serving the previous build after a deployment. The page itself is
+not cached either.
 
 ### Creating an empty WBS
 
