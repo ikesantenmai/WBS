@@ -28,6 +28,20 @@ def test_index_serves_the_app_shell(client):
     assert "/static/app.js" in response.text
 
 
+def test_the_assets_carry_the_version(client):
+    """入れ替えたあとに前の版が使われないよう、読み込みに版を付ける。"""
+    from wbsgen import __version__
+
+    text = client.get("/").text
+    assert f"/static/app.js?v={__version__}" in text
+    assert f"/static/style.css?v={__version__}" in text
+
+
+def test_the_page_itself_is_never_cached(client):
+    """版を書き換えるのはこのページなので、毎回取り直させる。"""
+    assert "no-store" in client.get("/").headers["cache-control"]
+
+
 @pytest.mark.parametrize("path", ["/static/app.js", "/static/style.css"])
 def test_static_assets_are_served(client, path):
     assert client.get(path).status_code == 200

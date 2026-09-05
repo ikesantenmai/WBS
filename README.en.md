@@ -151,6 +151,10 @@ The **running version** is shown at the top of the page (`wbsgen 2.1.0`). Check
 it there, or in `version` from `/api/meta`, to tell whether a deployment picked
 up the latest build.
 
+The JavaScript and CSS are loaded with the version attached
+(`app.js?v=2.1.0`), so a browser never keeps serving the previous build after a
+deployment. The page itself is not cached either.
+
 ### Creating an empty WBS
 
 The period, sheet and working-day settings are on the left; a preview with

@@ -235,7 +235,18 @@ async def export_workbook(
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    """トップページ。
+
+    JavaScript と CSS の読み込みに版を付ける。付けないと、入れ替えた
+    あともブラウザが前の版を使い続けてしまう。ページ自体は毎回
+    取り直させる (版を書き換えるのはこのページなので)。
+    """
+    page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for asset in ("app.js", "style.css"):
+        page = page.replace(f"/static/{asset}", f"/static/{asset}?v={__version__}")
+    return HTMLResponse(page, headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+    })
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
