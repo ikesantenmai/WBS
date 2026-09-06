@@ -671,24 +671,36 @@ function shortDate(iso) {
 }
 
 // ---------------------------------------------------------------- 日程表の見出し
+/** 文字の横幅のおおよそ。日本語は全角、英数字は半角ぶんで見積もる。 */
+function textWidth(text, size) {
+  let width = 0;
+  for (const ch of String(text || '')) {
+    width += /[\u3000-\u9fff\uff00-\uffef]/.test(ch) ? size : size * 0.6;
+  }
+  return width;
+}
+
 function chartHead(timeline, colW, width, height, withWeekday) {
   const root = svg('svg', {
     class: 'chart-head', width, height, viewBox: `0 0 ${width} ${height}`,
     'data-unit': timeline.unit,
   });
 
-  // 上段: 月 (月表示なら年)。Excel と同じく区切りの列にだけ置く。
+  // 上段: 月 (月表示なら年)。1 列ぶんではなく、その月の帯いっぱいを使う。
+  // 日単位では 1 列が狭いので、列の幅で判断すると月が出なくなる。
   root.append(svg('rect', { x: 0, y: 0, width, height: HEAD_H, fill: 'var(--month-band)' }));
   for (const band of timeline.bands) {
     const x = band.start * colW;
+    const bandW = (band.span || 1) * colW;
     root.append(svg('line', {
       x1: x, y1: 0, x2: x, y2: height, stroke: '#b8791f', 'stroke-width': 1,
     }));
     const label = svg('text', {
-      x: x + colW / 2, y: HEAD_H / 2 + 4, 'text-anchor': 'middle',
+      x: x + bandW / 2, y: HEAD_H / 2 + 4, 'text-anchor': 'middle',
       'font-size': 11, 'font-weight': 700, fill: '#fff',
     });
-    label.textContent = colW >= 26 ? band.label : '';
+    // 帯からはみ出すときだけ伏せる (端の月は数日ぶんしか幅が無い)
+    label.textContent = bandW >= textWidth(band.label, 11) + 4 ? band.label : '';
     root.append(label);
   }
 

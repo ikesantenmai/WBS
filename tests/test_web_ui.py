@@ -232,6 +232,17 @@ def test_the_chart_opens_in_day_units(page, filled_book):
     assert page.eval_on_selector("#chart-unit", "n => n.value") == "day"
 
 
+def test_the_month_shows_in_day_units(page, filled_book):
+    """日単位でも、上段に月が出る (列が狭くても帯の幅で置ける)。"""
+    page.set_input_files("#import-file", str(filled_book))
+    page.wait_for_selector("svg.chart-head[data-unit=day]")
+
+    months = _months(page)
+    assert months, "上段の月が出ていない"
+    assert all(m.endswith("月") for m in months), months
+    assert page.errors == []
+
+
 def test_the_chart_unit_can_be_switched(page, filled_book):
     page.set_input_files("#import-file", str(filled_book))
     page.wait_for_selector("svg.chart-head[data-unit=day]")
