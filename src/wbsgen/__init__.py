@@ -4,7 +4,7 @@
 Excel を書き出す。中身は入れない。
 """
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 from .blank import BlankWBS, build  # noqa: E402
 from .workbook import write  # noqa: E402

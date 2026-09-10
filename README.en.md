@@ -32,6 +32,8 @@ An Excel file with three sheets.
 - **Members** — the owners you listed, plus blank rows to add more
 - **Settings** — the period, unit, working days and the holidays in that period
 
+Exporting an imported file adds **Today** and a **Workload** sheet per month.
+
 The Schedule sheet has the same columns as the original tool.
 
 | Col | Contents | | Col | Contents |
@@ -147,7 +149,7 @@ wbsgen serve                       # http://127.0.0.1:8000
 wbsgen serve --host 0.0.0.0 --port 8080
 ```
 
-The **running version** is shown at the top of the page (`wbsgen 2.3.0`). Check
+The **running version** is shown at the top of the page (`wbsgen 2.4.0`). Check
 it there, or in `version` from `/api/meta`, to tell whether a deployment picked
 up the latest build.
 
@@ -227,6 +229,7 @@ sheets it rewrites under the same name**.
 | Sheet | What the export does |
 |-------|----------------------|
 | Schedule / Members / Settings | Rebuilt under the same name |
+| Today | Rebuilt under the same name |
 | Workload sheets for the months it generates | Rebuilt under the same name |
 | Everything else | **Left completely untouched** |
 
@@ -405,6 +408,19 @@ There are eleven checks. **Checks that found nothing are listed too**, marked
 
 The counting matches the totals bar above (rows, done, delayed), so the numbers
 never disagree. Owner names are split exactly as in the workload check below.
+
+The exported file carries a **Today sheet** with the same content.
+
+- A **summary** of sections and counts at the top, then each section listed
+- The columns are Group / Sub-group / No. / Task / Owner / the planned and
+  actual dates / Progress / Status
+- Date and progress formats, and the status colours, match the schedule sheet
+- The consistency checks are written as eleven rows of **what was checked,
+  count and verdict**, with the offending rows listed under each finding
+- A section longer than 200 rows stops there and says "n more"
+
+The base date is the day you export, so exporting on another day gives that
+day's status.
 
 ### The workload check
 

@@ -246,3 +246,170 @@ def test_another_base_date_changes_what_is_due():
     rows = [_row(2, start=D(2026, 9, 14), end=D(2026, 9, 18))]
     assert _build(rows, base=D(2026, 9, 14)).starting == [2]
     assert _build(rows, base=D(2026, 9, 14)).delayed == []
+
+
+# ---------------------------------------------------------------- Excel シート
+def _sheet(make_filled, tmp_path, rows=None, base=TODAY, name="out.xlsx"):
+    """記入済みファイルを書き出して、本日の状況シートを返す。"""
+    import openpyxl
+    from wbsgen.importer import read
+    from wbsgen.workbook import export
+
+    path = make_filled("daily.xlsx", rows=rows if rows is not None else _FILLED)
+    out = export(read(path, base_date=base), tmp_path / name, base)
+    return openpyxl.load_workbook(out)
+
+
+#: 基準日 (木曜) から見て、開始・終了・遅れ・未着手が 1 つずつ出る中身
+_FILLED = [
+    ("開発", "要件", "1", "本日開始", TODAY, None, D(2026, 9, 18),
+     None, None, None, None, None, "", "高瀬", ""),
+    ("開発", "要件", "2", "本日終了", D(2026, 9, 1), None, TODAY,
+     D(2026, 9, 1), None, None, None, None, "", "吉田", ""),
+    ("開発", "製造", "3", "遅れている", D(2026, 8, 3), None, D(2026, 8, 31),
+     None, None, None, None, None, "", "菊池", ""),
+    ("開発", "製造", "4", "これから", D(2026, 10, 1), None, D(2026, 10, 9),
+     None, None, None, None, None, "", "虎岩", ""),
+]
+
+
+def test_the_sheet_is_added_to_the_export(make_filled, tmp_path):
+    book = _sheet(make_filled, tmp_path)
+    assert "本日の状況" in book.sheetnames
+    # スケジュール・担当者一覧・設定 の次に置く
+    assert book.sheetnames[:4] == ["スケジュール", "担当者一覧", "設定", "本日の状況"]
+
+
+def test_the_sheet_starts_with_the_base_date(make_filled, tmp_path):
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    assert ws["B1"].value == "◆本日の状況（基準日 2026/9/10）"
+    assert ws["B3"].value == "◆まとめ"
+    assert ws["B4"].value == "区分"
+    assert ws["F4"].value == "件数"
+
+
+def test_the_summary_counts_every_section(make_filled, tmp_path):
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    summary = {ws.cell(row=r, column=2).value: ws.cell(row=r, column=6).value
+               for r in range(5, 11)}
+    assert summary == {
+        "本日開始予定": 1,
+        "本日終了予定": 1,
+        "遅延タスク": 1,
+        "未着手タスク": 3,        # 本日開始・遅れている・これから
+        "スケジュール整合性チェック": 0,
+        "本日アサインがない担当者": 2,   # 菊池・虎岩
+    }
+
+
+def test_each_section_lists_its_rows(make_filled, tmp_path):
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    names = {}
+    section = None
+    for r in range(1, ws.max_row + 1):
+        head = ws.cell(row=r, column=2).value
+        if isinstance(head, str) and head.startswith("【"):
+            section = head.strip("【】")
+        elif section and isinstance(head, str) and head not in ("大項目", "該当なし"):
+            names.setdefault(section, []).append(ws.cell(row=r, column=5).value)
+
+    assert names["本日開始予定"] == ["本日開始"]
+    assert names["本日終了予定"] == ["本日終了"]
+    assert names["遅延タスク"] == ["遅れている"]
+    assert set(names["未着手タスク"]) == {"本日開始", "遅れている", "これから"}
+
+
+def test_an_empty_section_says_so(make_filled, tmp_path):
+    """該当が無い区分は「該当なし」とだけ書く。"""
+    rows = [("開発", "", "1", "先の話", D(2026, 12, 1), None, D(2026, 12, 10),
+             None, None, None, None, None, "", "高瀬", "")]
+    ws = _sheet(make_filled, tmp_path, rows=rows)["本日の状況"]
+    texts = [ws.cell(row=r, column=2).value for r in range(1, ws.max_row + 1)]
+    assert texts.count("該当なし") >= 2          # 本日開始予定・本日終了予定
+
+
+def test_every_check_is_written_with_its_verdict(make_filled, tmp_path):
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    verdicts = {}
+    for r in range(1, ws.max_row + 1):
+        name = ws.cell(row=r, column=2).value
+        verdict = ws.cell(row=r, column=7).value
+        if verdict in ("問題なし", "要確認"):
+            verdicts[name] = (ws.cell(row=r, column=6).value, verdict)
+
+    assert len(verdicts) == 11
+    assert verdicts["予定の終了日が開始日より前"] == (0, "問題なし")
+
+
+def test_a_contradiction_is_written_with_the_rows(make_filled, tmp_path):
+    rows = [("開発", "", "1", "逆さま", D(2026, 9, 18), None, D(2026, 9, 1),
+             None, None, None, None, None, "", "高瀬", "")]
+    ws = _sheet(make_filled, tmp_path, rows=rows)["本日の状況"]
+    found = [r for r in range(1, ws.max_row + 1)
+             if ws.cell(row=r, column=2).value == "予定の終了日が開始日より前"]
+    assert len(found) == 1
+    at = found[0]
+    assert (ws.cell(row=at, column=6).value, ws.cell(row=at, column=7).value) \
+        == (1, "要確認")
+    # すぐ下に見出しと、その行が並ぶ
+    assert ws.cell(row=at + 1, column=2).value == "大項目"
+    assert ws.cell(row=at + 2, column=5).value == "逆さま"
+
+
+def test_the_idle_owners_are_listed(make_filled, tmp_path):
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    start = [r for r in range(1, ws.max_row + 1)
+             if ws.cell(row=r, column=2).value == "担当者"][0]
+    names = [ws.cell(row=r, column=2).value
+             for r in range(start + 1, ws.max_row + 1)]
+    assert names == ["菊池", "虎岩"]
+
+
+def test_the_dates_keep_the_sheet_format(make_filled, tmp_path):
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    at = [r for r in range(1, ws.max_row + 1)
+          if ws.cell(row=r, column=5).value == "本日開始"][0]
+    assert ws.cell(row=at, column=7).value == dt.datetime(2026, 9, 10)
+    assert ws.cell(row=at, column=7).number_format == "m/dd"
+    assert ws.cell(row=at, column=11).number_format == "0%"
+
+
+def test_the_status_keeps_its_colour(make_filled, tmp_path):
+    """状態の色は、スケジュールシートと同じ配色にする。"""
+    ws = _sheet(make_filled, tmp_path)["本日の状況"]
+    at = [r for r in range(1, ws.max_row + 1)
+          if ws.cell(row=r, column=5).value == "遅れている"][0]
+    cell = ws.cell(row=at, column=12)
+    assert cell.value.startswith("遅れ")
+    assert cell.fill.fgColor.rgb.endswith("FF99CC")
+
+
+def test_the_sheet_is_rebuilt_and_not_doubled(make_filled, tmp_path):
+    """書き出したファイルをもう一度読んでも、シートは増えない。"""
+    import openpyxl
+    from wbsgen.importer import read
+    from wbsgen.workbook import export
+
+    path = make_filled("daily.xlsx", rows=_FILLED)
+    once = export(read(path, base_date=TODAY), tmp_path / "1.xlsx", TODAY)
+    twice = export(read(once, base_date=TODAY), tmp_path / "2.xlsx", TODAY)
+    assert openpyxl.load_workbook(twice).sheetnames == \
+        openpyxl.load_workbook(once).sheetnames
+
+
+def test_the_sheet_is_translated(make_filled, tmp_path):
+    from wbsgen.importer import read
+    from wbsgen.workbook import export
+
+    path = make_filled("en.xlsx", rows=_FILLED)
+    imported = read(path, language="en", base_date=TODAY)
+    imported.spec.language = "en"
+    out = export(imported, tmp_path / "en-out.xlsx", TODAY)
+
+    import openpyxl
+    book = openpyxl.load_workbook(out)
+    assert "Today" in book.sheetnames
+    ws = book["Today"]
+    assert ws["B1"].value == "◆Today's status (as of 2026/9/10)"
+    assert ws["B4"].value == "Section"
+    assert ws.cell(row=5, column=2).value == "Planned to start today"

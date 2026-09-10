@@ -86,6 +86,27 @@ class Labels:
     load_free_item: str
     load_legend: str
 
+    #: 本日の状況シート
+    daily_sheet: str
+    daily_title: str
+    daily_note: str
+    daily_summary: str
+    daily_head_section: str
+    daily_head_count: str
+    daily_head_check: str
+    daily_head_verdict: str
+    daily_head_member: str
+    #: 区分の見出し (:mod:`wbsgen.daily` の並びと同じキー)
+    daily_sections: Dict[str, str]
+    #: 区分ごとの説明
+    daily_notes: Dict[str, str]
+    #: 整合性チェックの内容 (kind -> 文言)
+    daily_checks: Dict[str, str]
+    daily_none: str
+    daily_ok: str
+    daily_warn: str
+    daily_more: str
+
     #: 状態の文言 (``{days}`` に日数が入る)
     status_done: str
     status_delayed: str
@@ -151,6 +172,49 @@ JA = Labels(
     load_free_item="{month}/{day}({weekday})",
     load_legend="凡例：赤=タスク無し（要対応）／緑=1〜2件／"
                 "橙=3件以上（過負荷の可能性）／灰=非稼働日",
+    daily_sheet="本日の状況",
+    daily_title="◆本日の状況（基準日 {date}）",
+    daily_note="「{sheet}」から、基準日に手を打つべき行を拾ったものです。",
+    daily_summary="◆まとめ",
+    daily_head_section="区分",
+    daily_head_count="件数",
+    daily_head_check="内容",
+    daily_head_verdict="判定",
+    daily_head_member="担当者",
+    daily_sections={
+        "starting": "本日開始予定",
+        "ending": "本日終了予定",
+        "delayed": "遅延タスク",
+        "not_started": "未着手タスク",
+        "checks": "スケジュール整合性チェック",
+        "idle": "本日アサインがない担当者",
+    },
+    daily_notes={
+        "starting": "予定の開始日が本日の行です。実績の開始が空なら、着手の確認を。",
+        "ending": "予定の終了日が本日の行です。実績の終了が空なら、完了の確認を。",
+        "delayed": "予定の開始日を過ぎても未着手、"
+                   "または予定の終了日を過ぎても未完了の行です。",
+        "not_started": "実績が 1 つも入っていない行です（予定のある行だけ）。",
+        "checks": "書き方の食い違いを調べました。0 件なら問題ありません。",
+        "idle": "担当欄の名前のうち、本日にかかる予定が 1 つも無い人です。",
+    },
+    daily_checks={
+        "end_before_start": "予定の終了日が開始日より前",
+        "actual_end_before_start": "実績の終了日が開始日より前",
+        "plan_incomplete": "予定の開始日・終了日が片方しか無い",
+        "actual_end_without_start": "実績の終了日はあるのに開始日が無い",
+        "progress_without_actual": "進捗が入っているのに実績の開始日が無い",
+        "done_without_actual_end": "進捗 100% なのに実績の終了日が無い",
+        "no_dates": "日付が 1 つも入っていない",
+        "days_rewritten": "書かれた予定日数が、開始日・終了日と合わない",
+        "actual_days_rewritten": "書かれた実績日数が、実績の開始日・終了日と合わない",
+        "predecessor_missing": "先行に書かれた項番が見つからない",
+        "predecessor_order": "先行タスクの終了日より前に始まる予定",
+    },
+    daily_none="該当なし",
+    daily_ok="問題なし",
+    daily_warn="要確認",
+    daily_more="ほか {n} 件",
     status_done="完了",
     status_delayed="遅れ {days} 日",
     status_remaining="残り {days} 日",
@@ -215,6 +279,52 @@ EN = Labels(
     load_free_item="{month}/{day}({weekday})",
     load_legend="Red = no task (needs attention) / Green = 1-2 /"
                 " Orange = 3 or more (possibly overloaded) / Grey = non-working day",
+    daily_sheet="Today",
+    daily_title="\u25c6Today's status (as of {date})",
+    daily_note="Rows from \"{sheet}\" that need attention on the base date.",
+    daily_summary="\u25c6Summary",
+    daily_head_section="Section",
+    daily_head_count="Count",
+    daily_head_check="What was checked",
+    daily_head_verdict="Verdict",
+    daily_head_member="Owner",
+    daily_sections={
+        "starting": "Planned to start today",
+        "ending": "Planned to end today",
+        "delayed": "Delayed tasks",
+        "not_started": "Not started",
+        "checks": "Schedule consistency checks",
+        "idle": "Nobody assigned for today",
+    },
+    daily_notes={
+        "starting": "Rows whose planned start date is today."
+                    " Check the ones with no actual start.",
+        "ending": "Rows whose planned end date is today."
+                  " Check the ones with no actual end.",
+        "delayed": "Past the planned start with no actual start,"
+                   " or past the planned end and not finished.",
+        "not_started": "Rows with a plan but nothing filled in under Actual.",
+        "checks": "Contradictions in how the sheet is filled in."
+                  " Zero means nothing to fix.",
+        "idle": "Owners with no planned task covering today.",
+    },
+    daily_checks={
+        "end_before_start": "Planned end date is before the start date",
+        "actual_end_before_start": "Actual end date is before the actual start date",
+        "plan_incomplete": "Only one of the planned start / end dates",
+        "actual_end_without_start": "An actual end date without an actual start date",
+        "progress_without_actual": "Progress with no actual start date",
+        "done_without_actual_end": "Progress is 100% but there is no actual end date",
+        "no_dates": "A row with no dates at all",
+        "days_rewritten": "Written days do not match the start and end dates",
+        "actual_days_rewritten": "Written actual days do not match the actual dates",
+        "predecessor_missing": "The predecessor number is not in this sheet",
+        "predecessor_order": "Starts before its predecessor is planned to end",
+    },
+    daily_none="None",
+    daily_ok="No problems",
+    daily_warn="Check",
+    daily_more="{n} more",
     status_done="Done",
     status_delayed="Delayed {days} d",
     status_remaining="Remaining {days} d",

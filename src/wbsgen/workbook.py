@@ -21,7 +21,7 @@ import datetime as _dt
 import io
 from copy import copy
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.formatting.rule import FormulaRule
@@ -30,6 +30,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from . import style
 from .blank import BlankWBS
+from .daily import Digest, build as build_daily
 from .drawing import Drawing, Geometry, Shape
 from .i18n import Labels, labels as get_labels, status_kind
 from .inject import inject_drawing, sheet_part
@@ -91,6 +92,23 @@ PLAN_COLUMNS = (style.COL_START, style.COL_DAYS, style.COL_END)
 
 MEMBER_SHEET_ROWS = 12
 
+#: 本日の状況シートの行と列
+DAILY_ROW_TITLE = 1
+DAILY_ROW_NOTE = 2
+DAILY_ROW_SUMMARY = 4
+DAILY_COL_FIRST = 2                     # B 列から並べる
+DAILY_COL_COUNT = DAILY_COL_FIRST + 4   # まとめ・区分見出しの件数を置く列 (F)
+
+#: 一覧に並べる行数の上限 (これ以上は読めないので件数だけ知らせる)
+DAILY_LIST_LIMIT = 200
+
+#: 一覧の列 (属性名, 幅 px)
+DAILY_COLUMNS = (
+    ("group", 90), ("subgroup", 90), ("no", 44), ("name", 300), ("member", 110),
+    ("start", 76), ("end", 76), ("actual_start", 76), ("actual_end", 76),
+    ("progress", 56), ("status", 100),
+)
+
 # 要員稼働チェックの行位置 (添付の元表と同じ)
 LOAD_ROW_DATE = 4
 LOAD_ROW_WEEKDAY = 5
@@ -121,6 +139,7 @@ def export(imported, path, base_date=None) -> Path:
     resolve(imported.rows, spec.calendar(), day, spec.language)
     writer = _Writer(spec, rows=imported.rows, base_date=day)
     writer.workload = build_workload(imported.rows, spec.calendar())
+    writer.daily = build_daily(imported.rows, spec.calendar(), day)
     return writer.save(path, source=imported.source)
 
 
@@ -144,6 +163,8 @@ class _Writer:
         self.rows = list(rows or [])
         #: 要員稼働チェック (月ごと)。空なら作らない。
         self.workload: List[WorkloadMonth] = []
+        #: 本日の状況。``None`` なら作らない (空の WBS には付けない)。
+        self.daily: Optional[Digest] = None
         self.base_date = base_date or _dt.date.today()
         self.calendar = spec.calendar()
         self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
@@ -167,15 +188,13 @@ class _Writer:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         workbook = self._base(source)
-        titles = self._titles()
-        at = self._clear(workbook, titles)
-        plan = workbook.create_sheet(titles[0], at)
-        self._plan_sheet(plan)
-        self._member_sheet(workbook.create_sheet(titles[1], at + 1))
-        self._config_sheet(workbook.create_sheet(titles[2], at + 2))
-        for offset, month in enumerate(self.workload):
-            self._workload_sheet(
-                workbook.create_sheet(titles[3 + offset], at + 3 + offset), month)
+        sheets = self._sheets()
+        at = self._clear(workbook, [title for title, _write in sheets])
+        plan = None
+        for offset, (title, write_sheet) in enumerate(sheets):
+            ws = workbook.create_sheet(title, at + offset)
+            write_sheet(ws)
+            plan = plan or ws
         workbook.save(path)
 
         drawing = self._gantt()
@@ -195,15 +214,28 @@ class _Writer:
         workbook.remove(workbook.active)     # 既定の空シートは使わない
         return workbook
 
+    def _sheets(self):
+        """これから作るシートを ``(名前, 書く関数)`` で、書き出す順に並べる。
+
+        先頭は必ずスケジュール (ガントチャートの図形を入れる先)。
+        本日の状況と要員稼働チェックは、読み込んだ WBS のときだけ付く。
+        """
+        text = self.labels
+        out = [(text.sheet_plan, self._plan_sheet),
+               (text.sheet_member, self._member_sheet),
+               (text.sheet_config, self._config_sheet)]
+        if self.daily is not None:
+            out.append((text.daily_sheet, self._daily_sheet))
+        template = (text.load_sheet_dated if _needs_year(self.workload)
+                    else text.load_sheet)
+        for month in self.workload:
+            out.append((template.format(year=month.year, month=month.month),
+                        lambda ws, m=month: self._workload_sheet(ws, m)))
+        return out
+
     def _titles(self) -> List[str]:
         """これから作るシートの名前を、書き出す順に並べる。"""
-        dated = _needs_year(self.workload)
-        template = (self.labels.load_sheet_dated if dated
-                    else self.labels.load_sheet)
-        return [self.labels.sheet_plan, self.labels.sheet_member,
-                self.labels.sheet_config] + [
-            template.format(year=month.year, month=month.month)
-            for month in self.workload]
+        return [title for title, _write in self._sheets()]
 
     def _clear(self, workbook, titles: List[str]) -> int:
         """作り直すシートだけを消し、そこへ置き直す位置を返す。
@@ -586,6 +618,196 @@ class _Writer:
             if name:
                 swatch = ws.cell(row=row, column=3)
                 swatch.fill = style.fill(palette[i % len(palette)])
+
+    # ==================================================================
+    # 本日の状況
+    # ==================================================================
+    def _daily_sheet(self, ws: Worksheet) -> None:
+        """基準日に手を打つべきことを 1 枚にまとめる。
+
+        画面の「本日の状況」と同じ中身。まとめの件数を上に置き、
+        その下に区分ごとの一覧を並べる。
+        """
+        digest = self.daily
+        text = self.labels
+        by_row = {row.row: row for row in self.rows}
+
+        ws.sheet_view.showGridLines = False
+        ws.column_dimensions["A"].width = style.px_to_width(25)
+        for i, (_key, px) in enumerate(DAILY_COLUMNS):
+            ws.column_dimensions[get_column_letter(DAILY_COL_FIRST + i)].width = \
+                style.px_to_width(px)
+
+        title = ws.cell(row=DAILY_ROW_TITLE, column=DAILY_COL_FIRST,
+                        value=text.daily_title.format(date=_md(digest.date)))
+        title.font = style.font(12, bold=True, color=style.C_TITLE_FONT)
+        note = ws.cell(row=DAILY_ROW_NOTE, column=DAILY_COL_FIRST,
+                       value=text.daily_note.format(sheet=text.sheet_plan))
+        note.font = style.font(9, color=style.C_NOTE_FONT)
+
+        row = self._daily_summary(ws, digest)
+        row = self._daily_list(ws, row, "starting", digest.starting, by_row)
+        row = self._daily_list(ws, row, "ending", digest.ending, by_row)
+        row = self._daily_list(ws, row, "delayed", digest.delayed, by_row)
+        row = self._daily_list(ws, row, "not_started", digest.not_started, by_row)
+        row = self._daily_checks(ws, row, digest, by_row)
+        self._daily_members(ws, row, digest)
+        ws.freeze_panes = f"A{DAILY_ROW_SUMMARY}"
+
+    def _daily_summary(self, ws: Worksheet, digest: Digest) -> int:
+        """区分と件数のまとめ。次に書き始める行を返す。"""
+        text = self.labels
+        head = ws.cell(row=DAILY_ROW_SUMMARY - 1, column=DAILY_COL_FIRST,
+                       value=text.daily_summary)
+        head.font = style.font(11, bold=True, color=style.C_TITLE_FONT)
+
+        self._daily_head(ws, DAILY_ROW_SUMMARY,
+                         (text.daily_head_section, None, None, None,
+                          text.daily_head_count))
+        for offset, (key, count) in enumerate(self._daily_counts(digest)):
+            at = DAILY_ROW_SUMMARY + 1 + offset
+            name = ws.cell(row=at, column=DAILY_COL_FIRST,
+                           value=text.daily_sections[key])
+            name.font = style.font(10)
+            name.alignment = style.ALIGN_LEFT
+            name.border = style.BORDER_CELL
+            number = ws.cell(row=at, column=DAILY_COL_COUNT, value=count)
+            number.font = style.font(10, bold=bool(count))
+            number.alignment = style.ALIGN_CENTER
+            number.border = style.BORDER_CELL
+        return DAILY_ROW_SUMMARY + len(self._daily_counts(digest)) + 2
+
+    def _daily_counts(self, digest: Digest):
+        """まとめに出す (区分, 件数)。画面の並びと同じ。"""
+        return [
+            ("starting", len(digest.starting)),
+            ("ending", len(digest.ending)),
+            ("delayed", len(digest.delayed)),
+            ("not_started", len(digest.not_started)),
+            ("checks", sum(len(check.rows) for check in digest.checks)),
+            ("idle", len(digest.idle_members)),
+        ]
+
+    def _daily_head(self, ws: Worksheet, row: int, headers) -> None:
+        """見出しの行。``headers`` は B 列から順に置く文字 (``None`` で空欄)。"""
+        for i, label in enumerate(headers):
+            cell = ws.cell(row=row, column=DAILY_COL_FIRST + i, value=label)
+            cell.font = style.font(10, bold=True)
+            cell.alignment = style.ALIGN_CENTER
+            cell.fill = style.fill(style.C_LOAD_HEADER)
+            cell.border = style.BORDER_CELL
+
+    def _daily_section(self, ws: Worksheet, row: int, key: str, count: int) -> None:
+        """区分の見出し (名前・件数・その区分の説明)。"""
+        text = self.labels
+        name = ws.cell(row=row, column=DAILY_COL_FIRST,
+                       value=f"【{text.daily_sections[key]}】")
+        name.font = style.font(11, bold=True, color=style.C_TITLE_FONT)
+        number = ws.cell(row=row, column=DAILY_COL_COUNT, value=count)
+        number.font = style.font(11, bold=True, color=style.C_TITLE_FONT)
+        number.alignment = style.ALIGN_CENTER
+        note = ws.cell(row=row, column=DAILY_COL_COUNT + 1, value=text.daily_notes[key])
+        note.font = style.font(9, color=style.C_NOTE_FONT)
+
+    def _daily_list(self, ws: Worksheet, row: int, key: str,
+                    numbers, by_row) -> int:
+        """1 区分ぶんの一覧。次に書き始める行を返す。"""
+        self._daily_section(ws, row, key, len(numbers))
+        return self._daily_table(ws, row + 1, numbers, by_row)
+
+    def _daily_table(self, ws: Worksheet, row: int, numbers, by_row) -> int:
+        """行の一覧を表にする。1 行も無ければ「該当なし」とだけ書く。"""
+        text = self.labels
+        rows = [by_row[n] for n in numbers if n in by_row]
+        if not rows:
+            cell = ws.cell(row=row, column=DAILY_COL_FIRST, value=text.daily_none)
+            cell.font = style.font(10, color=style.C_NOTE_FONT)
+            return row + 2
+
+        self._daily_head(ws, row, [self._daily_column_head(key)
+                                   for key, _px in DAILY_COLUMNS])
+        shown = rows[:DAILY_LIST_LIMIT]
+        for offset, task in enumerate(shown):
+            self._daily_row(ws, row + 1 + offset, task)
+        at = row + 1 + len(shown)
+        if len(rows) > len(shown):
+            more = ws.cell(row=at, column=DAILY_COL_FIRST,
+                           value=text.daily_more.format(n=len(rows) - len(shown)))
+            more.font = style.font(9, color=style.C_NOTE_FONT)
+            at += 1
+        return at + 1
+
+    def _daily_column_head(self, key: str) -> str:
+        """一覧の列見出し。予定と実績で同じ言葉になる列は、頭を付けて分ける。"""
+        text = self.labels
+        if key in ("start", "end"):
+            return f"{text.group_plan} {text.columns[key]}"
+        if key in ("actual_start", "actual_end"):
+            return f"{text.group_actual} {text.columns[key]}"
+        return text.columns[key]
+
+    def _daily_row(self, ws: Worksheet, row: int, task) -> None:
+        """一覧の 1 行。日付・進捗の書式は記入欄と同じにする。"""
+        text = self.labels
+        for i, (key, _px) in enumerate(DAILY_COLUMNS):
+            value = getattr(task, key, None)
+            cell = ws.cell(row=row, column=DAILY_COL_FIRST + i, value=value)
+            cell.font = style.font(10)
+            cell.border = style.BORDER_CELL
+            cell.alignment = (style.ALIGN_NAME if key == "name"
+                              else style.ALIGN_LEFT
+                              if key in ("group", "subgroup", "member")
+                              else style.ALIGN_CENTER)
+            if key in ("start", "end", "actual_start", "actual_end"):
+                cell.number_format = text.date_format
+            elif key == "progress":
+                cell.number_format = style.FMT_PERCENT
+        self._status_style(ws.cell(row=row, column=DAILY_COL_FIRST
+                                   + len(DAILY_COLUMNS) - 1), task.status)
+
+    def _daily_checks(self, ws: Worksheet, row: int, digest: Digest, by_row) -> int:
+        """整合性チェック。問題の無かった項目も「問題なし」として並べる。"""
+        text = self.labels
+        found = sum(len(check.rows) for check in digest.checks)
+        self._daily_section(ws, row, "checks", found)
+        row += 1
+        self._daily_head(ws, row, (text.daily_head_check, None, None, None,
+                                   text.daily_head_count, text.daily_head_verdict))
+        row += 1
+
+        for check in digest.checks:
+            name = ws.cell(row=row, column=DAILY_COL_FIRST,
+                           value=text.daily_checks.get(check.kind, check.kind))
+            name.font = style.font(10, bold=bool(check.rows))
+            number = ws.cell(row=row, column=DAILY_COL_COUNT, value=len(check.rows))
+            number.font = style.font(10, bold=bool(check.rows))
+            number.alignment = style.ALIGN_CENTER
+            verdict = ws.cell(row=row, column=DAILY_COL_COUNT + 1,
+                              value=text.daily_warn if check.rows else text.daily_ok)
+            verdict.font = style.font(
+                10, bold=bool(check.rows),
+                color=style.C_NOWLINE if check.rows else style.C_NOTE_FONT)
+            row += 1
+            if check.rows:
+                row = self._daily_table(ws, row, check.rows, by_row)
+        return row + 1
+
+    def _daily_members(self, ws: Worksheet, row: int, digest: Digest) -> None:
+        """本日アサインがない担当者。"""
+        text = self.labels
+        self._daily_section(ws, row, "idle", len(digest.idle_members))
+        row += 1
+        if not digest.idle_members:
+            cell = ws.cell(row=row, column=DAILY_COL_FIRST, value=text.daily_none)
+            cell.font = style.font(10, color=style.C_NOTE_FONT)
+            return
+
+        self._daily_head(ws, row, (text.daily_head_member,))
+        for offset, name in enumerate(digest.idle_members):
+            cell = ws.cell(row=row + 1 + offset, column=DAILY_COL_FIRST, value=name)
+            cell.font = style.font(10)
+            cell.alignment = style.ALIGN_LEFT
+            cell.border = style.BORDER_CELL
 
     # ==================================================================
     # 要員稼働チェック
