@@ -147,7 +147,7 @@ wbsgen serve                       # http://127.0.0.1:8000
 wbsgen serve --host 0.0.0.0 --port 8080
 ```
 
-The **running version** is shown at the top of the page (`wbsgen 2.2.0`). Check
+The **running version** is shown at the top of the page (`wbsgen 2.3.0`). Check
 it there, or in `version` from `/api/meta`, to tell whether a deployment picked
 up the latest build.
 
@@ -204,6 +204,8 @@ and the Gantt chart side by side.
 - Hovering a bar shows the plan, actuals, progress, owner and status
 - It opens in **daily** units so the day-to-day movement is visible; the
   **unit** can be switched between daily, weekly and monthly
+- **View** switches between the **Gantt chart**, **Today's status** and the
+  **Workload check** (both described below)
 
 Columns are found by their heading text, so files with extra or reordered
 columns still read. The period, working days and holidays come from the
@@ -370,6 +372,40 @@ remaining orange, upcoming light blue).
 The exported file can be imported again; the tests check that the contents,
 period and totals round-trip.
 
+### Today's status
+
+After importing, set **View** to **Today's status** to see what needs
+attention today. The base date is **today** - the same date the delay and
+status columns are counted from.
+
+| Section | Rows it collects |
+|---------|------------------|
+| Planned to start today | The planned start date is today |
+| Planned to end today | The planned end date is today |
+| Delayed tasks | Past the planned start with no actual start, or past the planned end and not finished (worst first) |
+| Not started | Rows with a plan but nothing filled in under Actual (earliest planned start first) |
+| Schedule consistency checks | Contradictions in how the sheet is filled in (below) |
+| Nobody assigned for today | Owners with no planned task covering today |
+
+Every section folds away, and the count sits in its heading, so you can read
+the summary without opening anything. The lists keep the **font and background
+colours** of the imported file.
+
+There are eleven checks. **Checks that found nothing are listed too**, marked
+"No problems", so you can see what was actually verified.
+
+- Planned / actual end date before the start date
+- Only one of the planned start and end dates (and no days to derive it from)
+- An actual end date with no actual start date
+- Progress with no actual start date, or 100% with no actual end date
+- A row with no dates at all
+- Written planned / actual days that do not match the dates
+- A predecessor number that is not in the sheet, or a task starting before its
+  predecessor is planned to end
+
+The counting matches the totals bar above (rows, done, delayed), so the numbers
+never disagree. Owner names are split exactly as in the workload check below.
+
 ### The workload check
 
 **It is on screen too.** After importing, set **View** to "Workload check" and
@@ -463,6 +499,7 @@ src/wbsgen/
   workcal.py     working-day rules and Japanese public holidays
   palette.py     resolving Excel colours (RGB, indexed, theme) for the screen
   workload.py    the workload check per member
+  daily.py       today's status (due, delayed, not started, consistency)
   style.py       colours and formats (taken from the original file)
   workbook.py    writing Excel
   importer.py    reading a filled-in Excel file

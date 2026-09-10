@@ -11,6 +11,7 @@ import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from . import style
+from .daily import build as build_daily
 from .i18n import labels as get_labels, status_kind
 from .importer import ImportedWBS, Row, resolve
 from .timeline import Timeline
@@ -48,6 +49,24 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
         "members": [{"name": name, "color": color} for name, color in colors.items()],
         "totals": _totals(rows),
         "workload": _workload(imported, calendar, spec.language),
+        "daily": _daily(imported, calendar, today),
+    }
+
+
+def _daily(imported: ImportedWBS, calendar, today: _dt.date) -> Dict[str, Any]:
+    """本日の状況。行は番号で指す (行の中身は ``rows`` に入っている)。"""
+    digest = build_daily(imported.rows, calendar, today)
+    return {
+        "date": digest.date.isoformat(),
+        "starting": digest.starting,
+        "ending": digest.ending,
+        "delayed": digest.delayed,
+        "not_started": digest.not_started,
+        # 問題が無いチェックも返す (何を確かめたかが判るように)
+        "checks": [{"kind": check.kind, "rows": check.rows}
+                   for check in digest.checks],
+        "members": digest.members,
+        "idle_members": digest.idle_members,
     }
 
 

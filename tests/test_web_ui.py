@@ -535,6 +535,80 @@ def test_building_a_blank_wbs_shows_what_is_happening(page):
     assert page.errors == []
 
 
+# -------------------------------------------------------------- 本日の状況
+def _daily_view(page, book):
+    """読み込んで、本日の状況に切り替える。"""
+    if page.eval_on_selector("#view", "n => n.value") != "chart":
+        page.select_option("#view", "chart")
+    page.set_input_files("#import-file", str(book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+    page.select_option("#view", "daily")
+    page.wait_for_selector(".daily")
+
+
+def _sections(page):
+    return page.eval_on_selector_all(
+        ".daily-section .daily-label", "n => n.map(x => x.textContent)")
+
+
+def test_todays_status_can_be_shown(page, filled_book):
+    """読み込んだあと、聞かれた項目がひととおり並ぶ。"""
+    _daily_view(page, filled_book)
+
+    assert _sections(page) == ["本日開始予定", "本日終了予定", "遅延タスク",
+                              "未着手タスク", "スケジュール整合性チェック",
+                              "本日アサインがない担当者"]
+    assert "基準日" in page.text_content(".daily .sheet-title")
+    # 日程表の道具立ては引っ込む
+    assert page.is_hidden("#chart-unit-field")
+    assert page.is_hidden("#load-month-field")
+    assert page.errors == []
+
+
+def test_a_section_without_anything_says_so(page, filled_book):
+    """0 件の区分は「該当なし」と出し、開いても表は出さない。"""
+    _daily_view(page, filled_book)
+
+    counts = page.eval_on_selector_all(
+        ".daily-section .daily-count", "n => n.map(x => x.textContent)")
+    assert "該当なし" in counts
+    assert page.errors == []
+
+
+def test_the_not_started_task_is_listed(page, filled_book):
+    """実績が 1 つも入っていない行 (結合テスト) を拾う。"""
+    _daily_view(page, filled_book)
+
+    page.eval_on_selector_all(".daily-section", "n => n.forEach(d => (d.open = true))")
+    names = page.eval_on_selector_all(
+        ".daily-section:nth-of-type(4) table td.name", "n => n.map(x => x.textContent)")
+    assert "結合テスト" in names
+    assert page.errors == []
+
+
+def test_every_consistency_check_is_listed(page, filled_book):
+    """問題の無いチェックも「問題なし」として並ぶ。"""
+    _daily_view(page, filled_book)
+
+    page.eval_on_selector_all(".daily-section", "n => n.forEach(d => (d.open = true))")
+    page.wait_for_selector(".daily-check")
+    labels = page.eval_on_selector_all(".daily-check", "n => n.map(x => x.textContent)")
+    assert len(labels) >= 10
+    assert any("予定の終了日が開始日より前" in text for text in labels)
+    assert any("問題なし" in text for text in labels)
+    assert page.errors == []
+
+
+def test_going_back_to_the_chart_from_todays_status(page, filled_book):
+    _daily_view(page, filled_book)
+
+    page.select_option("#view", "chart")
+    page.wait_for_selector("svg.chart-body")
+    assert page.is_visible("#chart-unit-field")
+    assert page.errors == []
+
+
 # ---------------------------------------------------------- 要員稼働チェック
 def _load_view(page, book):
     """読み込んで、要員稼働チェックに切り替える。

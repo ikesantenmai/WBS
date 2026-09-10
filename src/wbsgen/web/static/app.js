@@ -80,7 +80,40 @@ const UI = {
     chart_unit: '表示単位',
     view: '表示',
     view_chart: 'ガントチャート',
+    view_daily: '本日の状況',
     view_load: '要員稼働チェック',
+    daily_base: '基準日',
+    daily_starting: '本日開始予定',
+    daily_ending: '本日終了予定',
+    daily_delayed: '遅延タスク',
+    daily_not_started: '未着手タスク',
+    daily_checks: 'スケジュール整合性チェック',
+    daily_idle: '本日アサインがない担当者',
+    daily_none: '該当なし',
+    daily_count: '{n} 件',
+    daily_people: '{n} 名',
+    daily_ok: '問題なし',
+    daily_all_busy: '担当者全員に、本日にかかる予定があります。',
+    daily_no_members: '担当が書かれていないので、アサインは調べられません。',
+    daily_more: 'ほか {n} 件（多いので先頭 {shown} 件だけ出しています）',
+    daily_info: '基準日 {date} / 遅延 {delayed} 件 / 未着手 {not_started} 件 / 指摘 {issues} 件',
+    daily_note_starting: '予定の開始日が本日の行です。実績の開始が空なら、着手の確認を。',
+    daily_note_ending: '予定の終了日が本日の行です。実績の終了が空なら、完了の確認を。',
+    daily_note_delayed: '予定の開始日を過ぎても未着手、または予定の終了日を過ぎても未完了の行です。',
+    daily_note_not_started: '実績が 1 つも入っていない行です（予定のある行だけ）。',
+    daily_note_checks: '書き方の食い違いを調べました。0 件なら問題ありません。',
+    daily_note_idle: '担当欄の名前のうち、本日にかかる予定が 1 つも無い人です。',
+    check_end_before_start: '予定の終了日が開始日より前',
+    check_actual_end_before_start: '実績の終了日が開始日より前',
+    check_plan_incomplete: '予定の開始日・終了日が片方しか無い',
+    check_actual_end_without_start: '実績の終了日はあるのに開始日が無い',
+    check_progress_without_actual: '進捗が入っているのに実績の開始日が無い',
+    check_done_without_actual_end: '進捗 100% なのに実績の終了日が無い',
+    check_no_dates: '日付が 1 つも入っていない',
+    check_days_rewritten: '書かれた予定日数が、開始日・終了日と合わない',
+    check_actual_days_rewritten: '書かれた実績日数が、実績の開始日・終了日と合わない',
+    check_predecessor_missing: '先行に書かれた項番が見つからない',
+    check_predecessor_order: '先行タスクの終了日より前に始まる予定',
     load_month: '月',
     load_date: '日付',
     load_weekday: '曜日',
@@ -174,7 +207,40 @@ const UI = {
     chart_unit: 'Unit',
     view: 'View',
     view_chart: 'Gantt chart',
+    view_daily: "Today's status",
     view_load: 'Workload check',
+    daily_base: 'As of',
+    daily_starting: 'Planned to start today',
+    daily_ending: 'Planned to end today',
+    daily_delayed: 'Delayed tasks',
+    daily_not_started: 'Not started',
+    daily_checks: 'Schedule consistency checks',
+    daily_idle: 'Nobody assigned for today',
+    daily_none: 'None',
+    daily_count: '{n}',
+    daily_people: '{n} people',
+    daily_ok: 'No problems',
+    daily_all_busy: 'Everyone has a task planned for today.',
+    daily_no_members: 'No owners are named, so assignments cannot be checked.',
+    daily_more: '{n} more (showing the first {shown})',
+    daily_info: 'As of {date} / {delayed} delayed / {not_started} not started / {issues} findings',
+    daily_note_starting: 'Rows whose planned start date is today. Check the ones with no actual start.',
+    daily_note_ending: 'Rows whose planned end date is today. Check the ones with no actual end.',
+    daily_note_delayed: 'Rows past their planned start with no actual start, or past their planned end and not finished.',
+    daily_note_not_started: 'Rows with a plan but nothing filled in under Actual.',
+    daily_note_checks: 'Contradictions in how the sheet is filled in. Zero means nothing to fix.',
+    daily_note_idle: 'Owners with no planned task covering today.',
+    check_end_before_start: 'Planned end date is before the start date',
+    check_actual_end_before_start: 'Actual end date is before the actual start date',
+    check_plan_incomplete: 'Only one of the planned start / end dates is filled in',
+    check_actual_end_without_start: 'An actual end date without an actual start date',
+    check_progress_without_actual: 'Progress is filled in but there is no actual start date',
+    check_done_without_actual_end: 'Progress is 100% but there is no actual end date',
+    check_no_dates: 'A row with no dates at all',
+    check_days_rewritten: 'The number of days written does not match the start and end dates',
+    check_actual_days_rewritten: 'The actual days written do not match the actual dates',
+    check_predecessor_missing: 'The predecessor number is not in this sheet',
+    check_predecessor_order: 'Starts before its predecessor is planned to end',
     load_month: 'Month',
     load_date: 'Date',
     load_weekday: 'Day',
@@ -438,6 +504,7 @@ function scheduleRefresh(delay = 250) {
 function render(model) {
   lastView = model;
   if (view === 'load') return renderLoad(model);
+  if (view === 'daily') return renderDaily(model);
   return renderChart(model);
 }
 
@@ -501,6 +568,204 @@ function tableColumns() {
   return TABLE_COLUMNS
     .filter((c) => c.key in set)
     .map((c) => ({ ...c, width: set[c.key] }));
+}
+
+// ------------------------------------------------------------ 本日の状況
+/*
+ * 読み込んだ WBS を基準日から見て、その日に手を打つべきことを並べる。
+ * サーバは行番号だけを返すので、行の中身は同じモデルの ``rows`` から引く。
+ */
+
+//: 1 つの区分に並べる行数の上限 (これ以上は読めないので件数だけ知らせる)
+const DAILY_LIMIT = 200;
+
+//: 一覧に出す列 (キー, 幅 px, 予定/実績の別)
+const DAILY_COLUMNS = [
+  { key: 'group', width: 72, cls: 'group' },
+  { key: 'subgroup', width: 78, cls: 'subgroup' },
+  { key: 'no', width: 36 },
+  { key: 'name', width: 236, cls: 'name' },
+  { key: 'member', width: 96, cls: 'member' },
+  { key: 'start', width: 62, group: 'plan' },
+  { key: 'end', width: 62, group: 'plan' },
+  { key: 'actual_start', width: 62, group: 'actual' },
+  { key: 'actual_end', width: 62, group: 'actual' },
+  { key: 'progress', width: 48 },
+  { key: 'status', width: 84, cls: 'status' },
+];
+
+//: 狭い画面で出す列と、その幅 (大項目・中項目・項番は落とす)
+const DAILY_NARROW = {
+  name: 150, member: 70, start: 52, end: 52,
+  actual_start: 52, actual_end: 52, progress: 44, status: 72,
+};
+
+/** いま描く列。狭い画面では、まず読みたい列だけに絞る。 */
+function dailyColumns() {
+  if (!isNarrow()) return DAILY_COLUMNS;
+  return DAILY_COLUMNS
+    .filter((column) => column.key in DAILY_NARROW)
+    .map((column) => ({ ...column, width: DAILY_NARROW[column.key] }));
+}
+
+function renderDaily(model) {
+  const daily = model.daily;
+  const parts = [];
+  if (model.warnings && model.warnings.length) parts.push(warningBox(model.warnings));
+  if (!daily) {
+    parts.push(el('p', { class: 'empty-note', text: t('daily_none') }));
+    $('#sheet').replaceChildren(...parts);
+    $('#preview-info').textContent = '';
+    renderTotals(model.totals);
+    return;
+  }
+
+  const byRow = new Map((model.rows || []).map((row) => [row.row, row]));
+  parts.push(el('div', { class: 'sheet-title' },
+    el('span', { text: `${t('daily_base')} ${daily.date}` })));
+
+  parts.push(dailySection('daily_starting', daily.starting, byRow, true));
+  parts.push(dailySection('daily_ending', daily.ending, byRow, true));
+  parts.push(dailySection('daily_delayed', daily.delayed, byRow, true));
+  parts.push(dailySection('daily_not_started', daily.not_started, byRow, false));
+  parts.push(dailyChecks(daily.checks || [], byRow));
+  parts.push(dailyMembers(daily));
+  $('#sheet').replaceChildren(el('div', { class: 'daily' }, ...parts));
+
+  const issues = (daily.checks || []).reduce((n, c) => n + c.rows.length, 0);
+  $('#preview-info').textContent = t('daily_info', {
+    date: daily.date, delayed: daily.delayed.length,
+    not_started: daily.not_started.length, issues,
+  });
+  renderTotals(model.totals);
+}
+
+/** 1 区分ぶんの折りたたみ。件数を見出しに出し、中身は表にする。 */
+function dailySection(key, numbers, byRow, open) {
+  const rows = (numbers || []).map((n) => byRow.get(n)).filter(Boolean);
+  const box = el('details', {
+    class: 'daily-section',
+    open: open && rows.length ? '' : false,
+  }, dailySummary(t(key), rows.length));
+  box.append(el('p', { class: 'note', text: t(`daily_note_${key.slice(6)}`) }));
+  box.append(...dailyBody(rows));
+  return box;
+}
+
+/** 見出し行 (名前と件数)。件数が 0 なら控えめに見せる。 */
+function dailySummary(label, count, unit = 'daily_count') {
+  return el('summary', {},
+    el('span', { class: 'daily-label', text: label }),
+    el('span', {
+      class: `daily-count${count ? '' : ' zero'}`,
+      text: count ? t(unit, { n: count }) : t('daily_none'),
+    }));
+}
+
+/** 表と、多すぎて省いたぶんの知らせ。 */
+function dailyBody(rows) {
+  if (!rows.length) return [];
+  const shown = rows.slice(0, DAILY_LIMIT);
+  const parts = [el('div', { class: 'table-wrap daily-table' }, dailyTable(shown))];
+  if (rows.length > shown.length) {
+    parts.push(el('p', {
+      class: 'note',
+      text: t('daily_more', { n: rows.length - shown.length, shown: shown.length }),
+    }));
+  }
+  return parts;
+}
+
+function dailyTable(rows) {
+  const columns = dailyColumns();
+  const cols = el('colgroup');
+  for (const column of columns) {
+    cols.append(el('col', { style: `width:${column.width}px` }));
+  }
+  const head = el('tr');
+  for (const column of columns) {
+    const group = column.group
+      ? `${t(column.group === 'plan' ? 'group_plan' : 'group_actual')} ` : '';
+    head.append(el('th', { text: group + t('columns')[column.key] }));
+  }
+  const body = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    for (const column of columns) tr.append(dailyCell(row, column));
+    body.append(tr);
+  }
+  const width = columns.reduce((total, c) => total + c.width, 0);
+  return el('table', { class: 'wbs daily-list', style: `width:${width}px` },
+            cols, el('thead', {}, head), body);
+}
+
+/** 一覧の 1 マス。読み込んだ文字色・背景はそのまま見せる。 */
+function dailyCell(row, column) {
+  const key = column.key;
+  const td = el('td', { class: column.cls || '' });
+  if (key === 'status') {
+    td.append(el('span', {
+      class: 'status-chip',
+      text: row.status || '',
+      style: row.status_bg ? `background:${row.status_bg};color:${row.status_fg}` : '',
+    }));
+    return td;
+  }
+  if (key === 'progress') {
+    td.textContent = row.progress == null ? '' : `${Math.round(row.progress * 100)}%`;
+  } else if (/start|end$/.test(key)) {
+    td.textContent = shortDate(row[key]);
+  } else {
+    td.textContent = row[key] == null ? '' : row[key];
+  }
+  if (row.colors && row.colors[key]) td.style.color = row.colors[key];
+  if (row.fills && row.fills[key]) td.style.background = row.fills[key];
+  return td;
+}
+
+/** スケジュール整合性チェック。問題の無い項目も「済」として並べる。 */
+function dailyChecks(checks, byRow) {
+  const found = checks.reduce((n, check) => n + check.rows.length, 0);
+  const box = el('details', { class: 'daily-section', open: found ? '' : false },
+    dailySummary(t('daily_checks'), found));
+  box.append(el('p', { class: 'note', text: t('daily_note_checks') }));
+
+  for (const check of checks) {
+    const label = t(`check_${check.kind}`) || check.kind;
+    if (!check.rows.length) {
+      box.append(el('p', { class: 'daily-check ok' },
+        el('span', { class: 'mark', text: '✓' }),
+        el('span', { text: label }),
+        el('span', { class: 'daily-count zero', text: t('daily_ok') })));
+      continue;
+    }
+    const rows = check.rows.map((n) => byRow.get(n)).filter(Boolean);
+    const item = el('details', { class: 'daily-check bad' },
+      el('summary', {},
+        el('span', { class: 'mark', text: '!' }),
+        el('span', { text: label }),
+        el('span', { class: 'daily-count', text: t('daily_count', { n: rows.length }) })));
+    item.append(...dailyBody(rows));
+    box.append(item);
+  }
+  return box;
+}
+
+/** 本日アサインがない担当者。 */
+function dailyMembers(daily) {
+  const idle = daily.idle_members || [];
+  const box = el('details', { class: 'daily-section', open: idle.length ? '' : false },
+    dailySummary(t('daily_idle'), idle.length, 'daily_people'));
+  box.append(el('p', { class: 'note', text: t('daily_note_idle') }));
+  if (!(daily.members || []).length) {
+    box.append(el('p', { class: 'empty-note', text: t('daily_no_members') }));
+  } else if (!idle.length) {
+    box.append(el('p', { class: 'empty-note', text: t('daily_all_busy') }));
+  } else {
+    box.append(el('div', { class: 'idle-members' },
+      ...idle.map((name) => el('span', { class: 'chip name-chip', text: name }))));
+  }
+  return box;
 }
 
 // ---------------------------------------------------- 要員稼働チェック
@@ -912,6 +1177,7 @@ async function importBytes(name, bytes, unit = null, announce = false) {
       totals: model.totals,
       warnings: model.warnings,
       workload: model.workload || [],
+      daily: model.daily || null,
       info: t('info_chart', {
         start: model.timeline.start, end: model.timeline.end,
         columns: model.timeline.columns.length, rows: model.rows.length,
@@ -954,17 +1220,21 @@ function fillMonths(months) {
   $('#load-month').replaceChildren(...months.map(
     (month, index) => el('option', { value: String(index), text: month.label })));
   $('#load-month').value = String(loadMonth);
-  $('#view').disabled = months.length === 0;
+  // 担当が書かれていないと稼働チェックは作れない。その選択肢だけ止める。
+  const load = $('#view').querySelector('option[value=load]');
+  if (load) load.disabled = months.length === 0;
+  if (view === 'load' && !months.length) view = 'chart';
 }
 
 function applyView() {
   const chart = mode === 'chart';
+  const gantt = chart && view === 'chart';
   const load = chart && view === 'load';
   $('#view').value = view;          // 「戻る」でガントチャートに戻したときも合わせる
-  $('#chart-unit-field').hidden = !chart || load;
+  $('#chart-unit-field').hidden = !gantt;
   $('#load-month-field').hidden = !load;
   applyNarrow();
-  $('#preview-title').textContent = t(load ? 'view_load' : (chart ? 'chart' : 'preview'));
+  $('#preview-title').textContent = chart ? t(`view_${view}`) : t('preview');
 }
 
 // ------------------------------------------------------ スマートフォン向け
@@ -977,7 +1247,7 @@ function applyNarrow() {
   const tabs = isPhone() && mode === 'blank';
   $('#pane-tabs').hidden = !tabs;
   // 列の選択はガントチャートの表のためのもの (稼働チェックには効かない)
-  $('#columns-field').hidden = !narrow || view === 'load';
+  $('#columns-field').hidden = !narrow || view !== 'chart';
 
   const layout = document.querySelector('.layout');
   layout.classList.toggle('pane-form', tabs && pane === 'form');
@@ -1054,7 +1324,7 @@ function fillChoices() {
   $('#unit').value = unit;
   $('#chart-unit').replaceChildren(...options());
   $('#chart-unit').value = chartUnit;
-  $('#view').replaceChildren(...['chart', 'load'].map(
+  $('#view').replaceChildren(...['chart', 'daily', 'load'].map(
     (v) => el('option', { value: v, text: t(`view_${v}`) })));
   $('#view').value = view;
   $('#columns-mode').replaceChildren(...COLUMN_MODES.map(

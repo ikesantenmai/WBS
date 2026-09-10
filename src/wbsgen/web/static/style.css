@@ -241,6 +241,64 @@ table.wbs.load td.free-days {
 }
 .empty-note { padding: 40px; text-align: center; color: var(--muted); }
 
+/* ---------------- 本日の状況 ---------------- */
+.daily { padding: 0 0 20px; }
+.daily .note { padding: 0 14px 6px; }
+.daily .empty-note { padding: 12px 14px; text-align: left; }
+
+.daily-section { border-bottom: 1px solid var(--line-soft); }
+.daily-section > summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; cursor: pointer; font-size: 13px; list-style: none;
+}
+.daily-section > summary::-webkit-details-marker { display: none; }
+.daily-section > summary::before {
+  content: '\25b6'; font-size: 9px; color: var(--muted); transition: transform .1s;
+}
+.daily-section[open] > summary::before { transform: rotate(90deg); }
+.daily-section > summary:hover { background: var(--line-soft); }
+.daily-label { font-weight: 700; }
+.daily-count {
+  padding: 1px 8px; border-radius: 10px;
+  background: #fde8e8; color: var(--danger); font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.daily-count.zero { background: var(--line-soft); color: var(--muted); font-weight: normal; }
+
+/* 一覧は表そのものだけを横に流す (左に貼り付けない) */
+.daily .table-wrap { position: static; overflow-x: auto; padding: 0 14px 12px; }
+table.wbs.daily-list { font-size: 11px; }
+table.wbs.daily-list thead th { background: var(--header); }
+table.wbs.daily-list td.name { padding-left: 6px; }
+
+/* 整合性チェックの 1 項目 */
+.daily-check {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 14px 5px 26px; font-size: 12px;
+}
+/* 件数が遠くに離れないよう、見出しの行だけ幅を切る (中の表は切らない) */
+.daily-check.ok { max-width: 620px; }
+.daily-check.bad { display: block; padding: 0; }
+.daily-check.bad > summary {
+  display: flex; align-items: center; gap: 8px; max-width: 620px;
+  padding: 5px 14px 5px 26px; cursor: pointer; list-style: none; font-size: 12px;
+}
+.daily-check.bad > summary::-webkit-details-marker { display: none; }
+.daily-check.bad > summary:hover { background: var(--line-soft); }
+.daily-check .mark { flex: none; width: 16px; text-align: center; font-weight: 700; }
+.daily-check.ok { color: var(--muted); }
+.daily-check.ok .mark { color: #2e7d32; }
+.daily-check.bad .mark { color: var(--danger); }
+.daily-check.ok > span:nth-child(2), .daily-check.bad > summary > span:nth-child(2) {
+  flex: 1; min-width: 0;
+}
+
+.idle-members { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 14px 14px; }
+.name-chip {
+  padding: 3px 10px; border: 1px solid var(--line); border-radius: 12px;
+  background: #fff; color: var(--ink); font-size: 12px;
+}
+
 
 /* ================================================================
  * スマートフォン (狭い画面)
@@ -300,6 +358,12 @@ table.wbs.load td.free-days {
 
 .sheet-title { padding-left: 12px; padding-right: 12px; }
   table.wbs td.status span { min-width: 44px; }
+
+  /* 本日の状況: 指を置ける高さにして、左右の余白を詰める */
+  .daily-section > summary { padding: 12px; min-height: 44px; }
+  .daily .note, .daily .empty-note,
+  .daily .table-wrap, .idle-members { padding-left: 12px; padding-right: 12px; }
+  .daily-check, .daily-check.bad > summary { padding: 8px 12px 8px 22px; min-height: 40px; }
 }
 
 /* ---- 指定フォームと日程表を横に並べられない幅 ---- */

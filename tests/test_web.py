@@ -211,6 +211,48 @@ def test_import_returns_the_workload_check(client, filled_book):
     assert any("4/" in member["free_days"] for member in april["members"])
 
 
+def test_import_returns_todays_status(client, filled_book):
+    """本日の状況も一緒に返す (画面で切り替えて見られるように)。"""
+    daily = _upload(client, filled_book).json()["daily"]
+    assert daily["date"] == dt.date.today().isoformat()
+    # 実績が 1 つも入っていない行 (結合テスト) は未着手
+    assert 9 in daily["not_started"]
+    # 何を確かめたかが判るよう、問題の無いチェックも返す
+    kinds = [check["kind"] for check in daily["checks"]]
+    assert "end_before_start" in kinds and "predecessor_order" in kinds
+    assert daily["members"] == ["設計", "製造", "テスト"]
+
+
+def test_todays_status_finds_a_task_due_today(client, make_filled):
+    today = dt.date.today()
+    path = make_filled("today.xlsx", rows=[
+        ("開発", "", "1", "本日開始", today, None, today + dt.timedelta(days=6),
+         None, None, None, None, None, "", "高瀬", ""),
+        ("開発", "", "2", "本日終了", today - dt.timedelta(days=6), None, today,
+         None, None, None, None, None, "", "吉田", ""),
+        ("開発", "", "3", "先の話", today + dt.timedelta(days=30), None,
+         today + dt.timedelta(days=40),
+         None, None, None, None, None, "", "鈴木", ""),
+    ])
+    daily = _upload(client, path).json()["daily"]
+    assert daily["starting"] == [5]
+    assert daily["ending"] == [6]
+    # 本日にかかる予定が無い人だけ並ぶ
+    assert daily["idle_members"] == ["鈴木"]
+
+
+def test_todays_status_reports_a_contradiction(client, make_filled):
+    """終了日が開始日より前の行を、整合性チェックが拾う。"""
+    path = make_filled("broken.xlsx", rows=[
+        ("開発", "", "1", "逆さま", D(2026, 4, 20), None, D(2026, 4, 10),
+         None, None, None, None, None, "", "高瀬", ""),
+    ])
+    daily = _upload(client, path).json()["daily"]
+    found = {check["kind"]: check["rows"] for check in daily["checks"]}
+    assert found["end_before_start"] == [5]
+    assert found["actual_end_before_start"] == []
+
+
 def test_the_workload_is_empty_without_owners(client, make_filled):
     path = make_filled("noowner.xlsx", rows=[
         ("開発", "", "1", "A", D(2026, 4, 1), 10, D(2026, 4, 14),
