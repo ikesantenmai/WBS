@@ -302,10 +302,24 @@ def test_the_export_button_is_hidden_before_importing(page):
 
 
 # ---------------------------------------------------------------- 言語
+#: 言語を切り替え終えたか見るための、表の先頭の見出し
+_FIRST_COLUMN = {"ja": "大項目", "en": "Group"}
+
+
 def _set_language(page, value):
+    """言語を切り替え、表がその言語で描き直されるまで待つ。
+
+    ``documentElement.lang`` は切り替えの初めに変わるので、それだけでは
+    前の言語の表を見てしまう。見出しが変わったことまで確かめる。
+    """
     page.select_option("#language", value)
     page.wait_for_function(f"() => document.documentElement.lang === '{value}'")
-    page.wait_for_selector("table.wbs tbody tr")
+    page.wait_for_function(
+        """(want) => {
+             const th = document.querySelector('table.wbs thead tr:nth-child(2) th');
+             return th && th.textContent === want;
+           }""",
+        arg=_FIRST_COLUMN[value])
 
 
 def test_the_page_starts_in_japanese(page):

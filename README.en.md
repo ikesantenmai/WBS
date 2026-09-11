@@ -149,7 +149,7 @@ wbsgen serve                       # http://127.0.0.1:8000
 wbsgen serve --host 0.0.0.0 --port 8080
 ```
 
-The **running version** is shown at the top of the page (`wbsgen 2.4.0`). Check
+The **running version** is shown at the top of the page (`wbsgen 2.4.1`). Check
 it there, or in `version` from `/api/meta`, to tell whether a deployment picked
 up the latest build.
 
@@ -212,6 +212,14 @@ and the Gantt chart side by side.
 Columns are found by their heading text, so files with extra or reordered
 columns still read. The period, working days and holidays come from the
 Settings sheet and the owners from the Members sheet.
+
+**The calendar is stretched to cover the dates written in the sheet.** A plan
+often runs past the period in the Settings sheet because nobody updated it;
+without this, those rows get no bar at all and the work looks like it
+vanished. The end is rounded up to **the last day of that month**, so the
+final month is never cut off halfway in daily units. Dates **more than a year**
+past the configured end are treated as typos and do not stretch it, so one
+mistyped year cannot blow the calendar up by several years.
 
 Because these sheets are filled in by hand, the following are also accepted.
 

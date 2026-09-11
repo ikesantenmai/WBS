@@ -11,6 +11,8 @@ from wbsgen.blank import SpecError, build
 from wbsgen.importer import read
 from wbsgen.workbook import SHEET_PLAN, write
 
+D = dt.date
+
 
 # ---------------------------------------------------------------- 基本
 def test_reads_the_rows(filled_book):
@@ -59,6 +61,52 @@ def test_period_comes_from_the_config_sheet(filled_book):
     assert spec.start == dt.date(2026, 4, 1)
     assert spec.period_days == 365
     assert spec.unit == "week"
+
+
+def test_the_period_reaches_the_end_of_the_last_month(make_filled):
+    """設定が月の途中で終わっていても、その月の末日まで出す。"""
+    path = make_filled("half.xlsx", start=D(2026, 4, 1), end=None, period_days=135,
+                       rows=[("開発", "", "1", "作業", D(2026, 4, 6), 5,
+                              D(2026, 4, 10), None, None, None, None, None,
+                              "", "設計", "")])
+    spec = read(path).spec
+    assert spec.end == D(2026, 8, 31)                 # 設定は 8/13 まで
+
+
+def test_the_period_is_stretched_to_the_last_date_written(make_filled):
+    """設定より後ろの日付があれば、そこまで伸ばす。
+
+    計画が延びても設定を直していないファイルがあり、そのままでは
+    はみ出した行のバーが描かれず、作業が消えて見えるため。
+    """
+    path = make_filled("late.xlsx", start=D(2026, 4, 1), end=None, period_days=60,
+                       rows=[("開発", "", "1", "延びた", D(2026, 4, 6), None,
+                              D(2026, 7, 15), None, None, None, None, None,
+                              "", "設計", "")])
+    spec = read(path).spec
+    assert spec.end == D(2026, 7, 31)
+
+
+def test_a_date_far_outside_the_period_does_not_stretch_it(make_filled):
+    """1 年より先は、西暦の打ち間違いとみなして伸ばさない。"""
+    path = make_filled("typo.xlsx", start=D(2026, 4, 1), end=None, period_days=60,
+                       rows=[("開発", "", "1", "打ち間違い", D(2026, 4, 6), None,
+                              D(2030, 1, 7), None, None, None, None, None,
+                              "", "設計", "")])
+    assert read(path).spec.end == D(2026, 5, 31)      # 設定のまま (5/30 の月末)
+
+
+def test_the_period_is_the_same_when_read_again(make_filled, tmp_path):
+    """伸ばした期間で書き出し、読み直しても同じになる。"""
+    from wbsgen.workbook import export
+
+    path = make_filled("again.xlsx", start=D(2026, 4, 1), end=None, period_days=60,
+                       rows=[("開発", "", "1", "延びた", D(2026, 4, 6), None,
+                              D(2026, 7, 15), None, None, None, None, None,
+                              "", "設計", "")])
+    once = read(path)
+    out = export(once, tmp_path / "out.xlsx", D(2026, 4, 10))
+    assert read(out).spec.end == once.spec.end == D(2026, 7, 31)
 
 
 def test_members_come_from_the_member_sheet(filled_book):

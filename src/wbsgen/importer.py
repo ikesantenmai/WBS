@@ -748,19 +748,49 @@ def _read_members(book) -> List[str]:
     return names
 
 
+#: 設定シートの期間より後ろの日付があったとき、伸ばしてよい日数。
+#: これより先は日付の書き間違いとみなし、設定のままにする
+#: (西暦を打ち間違えた 1 行で、日程表が何年ぶんにも伸びないように)。
+MAX_EXTEND_DAYS = 366
+
+
+def _period_days(start: _dt.date, period, days: List[_dt.date]) -> int:
+    """日程表に出す日数。**記入された日付が入る長さ**にする。
+
+    設定シートの期間より後ろの日付が書かれていることがある (計画が延びても
+    設定を直していないファイル)。そのままでは日程表からはみ出した行の
+    バーが描かれず、その作業が消えて見えるので、最後の日付まで伸ばす。
+    ただし :data:`MAX_EXTEND_DAYS` より先は伸ばさない。
+
+    終わりは**その月の末日**にそろえる。日単位では月の途中で切れると、
+    最終月が尻切れに見えるため。
+    """
+    latest = max(days) if days else None
+    if not period:
+        # 設定シートが無いファイル。書かれている日付だけが手がかり。
+        return (_end_of_month(latest or start) - start).days + 1
+
+    end = start + _dt.timedelta(days=max(period, 1) - 1)
+    if latest and end < latest <= end + _dt.timedelta(days=MAX_EXTEND_DAYS):
+        end = latest
+    return (_end_of_month(end) - start).days + 1
+
+
+def _end_of_month(day: _dt.date) -> _dt.date:
+    return (_dt.date(day.year + 1, 1, 1) if day.month == 12
+            else _dt.date(day.year, day.month + 1, 1)) - _dt.timedelta(days=1)
+
+
 def _build_spec(config, rows: List[Row], book, filename: str, language: str) -> BlankWBS:
     """表示に使う期間を決める。設定シートが無ければ記入内容から割り出す。"""
     days = [d for row in rows
             for d in (row.start, row.end, row.actual_start, row.actual_end) if d]
 
     start = config.get("start")
-    period = config.get("period_days")
     if start is None:
         start = min(days) if days else _dt.date.today()
         start = start.replace(day=1)
-    if period is None:
-        last = max(days) if days else start
-        period = max((last - start).days + 14, 30)
+    period = _period_days(start, config.get("period_days"), days)
 
     title = Path(filename).stem if filename else message(language, "imported_title")
     spec = BlankWBS(
