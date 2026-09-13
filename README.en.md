@@ -334,6 +334,14 @@ in a lighter font, with the reason on hover.
 counted again from the start and end dates. This applies to both plan and
 actual.
 
+Only **working days** are counted: **Saturdays, Sundays and public holidays
+never count** (weekends follow the working-day setting, holidays are
+[computed by the tool](#working-days-and-days-off)). That holds for the start
+and end dates themselves too. For example 11 Jan 2027 (Coming-of-Age Day) to
+18 Jan is **5 days**, and 18 Sep to 24 Sep 2026 - across Respect-for-the-Aged
+Day, the citizens' holiday and the Autumn Equinox - is **2 days**. The delay
+column and the "n days left" statuses are counted the same way.
+
 | What is filled in | What follows |
 |-------------------|--------------|
 | Planned start and end | **Days are counted again from those two** (working days, both ends included) |

@@ -119,6 +119,47 @@ def test_holidays_come_from_the_config_sheet(filled_book):
     assert not spec.calendar().is_workday(dt.date(2026, 4, 29))
 
 
+def test_the_number_of_days_never_counts_a_saturday_sunday_or_holiday(make_filled):
+    """日数は稼働日だけを数える (土曜・日曜・祝日は入れない)。
+
+    開始日か終了日そのものが休みのこともあるので、両端も数えない。
+    """
+    rows = [
+        # 月〜金の 1 週間 + 土日 → 5 日
+        ("開発", "", "1", "一週間", D(2026, 9, 7), None, D(2026, 9, 13),
+         None, None, None, None, None, "", "設計", ""),
+        # 敬老の日 9/21・国民の休日 9/22・秋分の日 9/23 をまたぐ
+        ("開発", "", "2", "連休またぎ", D(2026, 9, 18), None, D(2026, 9, 24),
+         None, None, None, None, None, "", "設計", ""),
+        # 開始日が祝日 (成人の日 2027/1/11)
+        ("開発", "", "3", "祝日はじまり", D(2027, 1, 11), None, D(2027, 1, 15),
+         None, None, None, None, None, "", "設計", ""),
+        # 土曜に始まり月曜に終わる
+        ("開発", "", "4", "土曜はじまり", D(2026, 9, 12), None, D(2026, 9, 14),
+         None, None, None, None, None, "", "設計", ""),
+        # 実績も同じ数え方
+        ("開発", "", "5", "実績", D(2026, 9, 7), None, D(2026, 9, 11),
+         D(2026, 9, 18), None, D(2026, 9, 24), None, None, "", "設計", ""),
+    ]
+    got = {row.no: (row.days, row.actual_days)
+           for row in read(make_filled("count.xlsx", rows=rows)).rows}
+
+    assert got["1"][0] == 5       # 9/7-9/11 (9/12 土・9/13 日は数えない)
+    assert got["2"][0] == 2       # 9/18 金・9/24 木 (9/21-23 は祝日)
+    assert got["3"][0] == 4       # 1/12-1/15 (1/11 成人の日は数えない)
+    assert got["4"][0] == 1       # 9/14 月だけ
+    assert got["5"] == (5, 2)
+
+
+def test_saturday_counts_when_it_is_a_working_day(make_filled):
+    """稼働曜日に土曜を入れていれば、そのぶんは数える (祝日は別)。"""
+    rows = [("開発", "", "1", "一週間", D(2026, 9, 7), None, D(2026, 9, 13),
+             None, None, None, None, None, "", "設計", "")]
+    path = make_filled("sat3.xlsx", rows=rows,
+                       workdays=["mon", "tue", "wed", "thu", "fri", "sat"])
+    assert read(path).rows[0].days == 6        # 9/13 日曜だけ数えない
+
+
 def test_public_holidays_are_always_applied(make_filled):
     """設定シートに休日一覧があっても、祝日はこのツールが調べて休みにする。
 
