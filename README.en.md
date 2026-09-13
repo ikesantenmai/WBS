@@ -69,6 +69,30 @@ weekday. Move the start date if you want the weeks to break elsewhere.
 
 In the daily view, Saturdays, Sundays and holidays are shaded.
 
+### Working days and days off
+
+Saturdays and Sundays follow the **working-day setting** (Monday to Friday by
+default), and **Japanese public holidays are computed by the tool** for every
+year. They match the Cabinet Office list, including substitute holidays and
+"citizens' holidays" (a weekday caught between two holidays). The years whose
+dates moved are covered too - 2019 (the imperial succession: 1 May and
+22 October, and no Emperor's Birthday that year) and 2020-2021 (Marine Day,
+Sports Day and Mountain Day moved for the Olympics). The tests check every
+year from 2007 to 2060 against that list.
+
+Company days off (year-end, for instance) are given separately.
+
+| What | Where |
+|------|-------|
+| Working weekdays | "Working days" on screen / `--workdays mon,tue,wed,thu,fri,sat` |
+| Extra days off | "Extra days off" on screen / `--holiday 2026-12-30` |
+| Ignore public holidays | `--no-jp-holidays` (when creating a blank WBS only) |
+
+**Importing a filled-in Excel file always applies the public holidays**, and
+the list on the Settings sheet is added to them, so company days off still
+count. That list only covers the period it was written for, so holidays would
+otherwise go missing past the end of the calendar, or in a hand-made file.
+
 ---
 
 ## Language
@@ -149,7 +173,7 @@ wbsgen serve                       # http://127.0.0.1:8000
 wbsgen serve --host 0.0.0.0 --port 8080
 ```
 
-The **running version** is shown at the top of the page (`wbsgen 2.4.1`). Check
+The **running version** is shown at the top of the page (`wbsgen 2.5.0`). Check
 it there, or in `version` from `/api/meta`, to tell whether a deployment picked
 up the latest build.
 

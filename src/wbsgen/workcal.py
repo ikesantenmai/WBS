@@ -139,11 +139,33 @@ def _nth_weekday(year: int, month: int, weekday: int, nth: int) -> _dt.date:
     return first + _dt.timedelta(days=offset + 7 * (nth - 1))
 
 
+#: 祝日法どおりに求められない年 (内閣府の「国民の祝日」一覧に合わせる)。
+#:
+#: - 2019 年: 天皇の即位に伴う祝日。この年に天皇誕生日は無い
+#:   (4/30 と 5/2 は、祝日に挟まれた日として自動で休みになる)
+#: - 2020・2021 年: オリンピックのため、海の日・スポーツの日・山の日が動いた
+SPECIAL_YEARS = {
+    2019: {
+        "drop": ((12, 23),),
+        "add": ((5, 1), (10, 22)),
+    },
+    2020: {
+        "drop": ((7, 20), (8, 11), (10, 12)),
+        "add": ((7, 23), (7, 24), (8, 10)),
+    },
+    2021: {
+        "drop": ((7, 19), (8, 11), (10, 11)),
+        "add": ((7, 22), (7, 23), (8, 8)),
+    },
+}
+
+
 def japanese_holidays(year: int) -> "list[_dt.date]":
     """``year`` 年の日本の国民の祝日 (振替休日・国民の休日を含む)。
 
     2007 年以降の祝日法に対応する。山の日は 2016 年から、
-    天皇誕生日は 2020 年から 2/23 として扱う。
+    天皇誕生日は 2020 年から 2/23 として扱う。日付が動いた年は
+    :data:`SPECIAL_YEARS` で補う。
     """
     fixed = [
         (1, 1),    # 元日
@@ -168,6 +190,13 @@ def japanese_holidays(year: int) -> "list[_dt.date]":
         days.append(_dt.date(year, 2, 23))     # 天皇誕生日
     else:
         days.append(_dt.date(year, 12, 23))
+
+    # 日付が動いた年を直してから、挟まれた日と振替を求める
+    special = SPECIAL_YEARS.get(year)
+    if special:
+        drop = set(special.get("drop", ()))
+        days = [day for day in days if (day.month, day.day) not in drop]
+        days += [_dt.date(year, month, day) for month, day in special.get("add", ())]
 
     known = set(days)
     # 国民の休日 (祝日に挟まれた平日)

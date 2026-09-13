@@ -202,10 +202,23 @@ def test_downloading_the_workbook(page, tmp_path):
 
 
 # ---------------------------------------------------------------- 読み込み
-def test_importing_a_workbook_draws_a_gantt_chart(page, filled_book):
-    page.set_input_files("#import-file", str(filled_book))
+def _import(page, book, unit="day"):
+    """記入済みファイルを読み込み、日程表が描き直されるまで待つ。
+
+    前のテストの表示が残っていると、待ちたい条件が最初から満たされていて
+    すり抜けてしまう。いったん新規作成に戻してから読み込む。
+    """
+    if page.is_visible("#btn-back"):
+        page.click("#btn-back")
+        page.wait_for_selector("#spec-form:not([hidden])")
+    page.set_input_files("#import-file", str(book))
+    page.wait_for_selector(f"svg.chart-head[data-unit={unit}]")
     page.wait_for_function(
         "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+
+def test_importing_a_workbook_draws_a_gantt_chart(page, filled_book):
+    _import(page, filled_book)
 
     # 表に記入内容が並ぶ
     first = page.eval_on_selector_all(
@@ -227,15 +240,13 @@ def test_importing_a_workbook_draws_a_gantt_chart(page, filled_book):
 
 def test_the_chart_opens_in_day_units(page, filled_book):
     """読み込んだ WBS は、まず日単位で見せる。"""
-    page.set_input_files("#import-file", str(filled_book))
-    page.wait_for_selector("svg.chart-head[data-unit=day]")
+    _import(page, filled_book)
     assert page.eval_on_selector("#chart-unit", "n => n.value") == "day"
 
 
 def test_the_month_shows_in_day_units(page, filled_book):
     """日単位でも、上段に月が出る (列が狭くても帯の幅で置ける)。"""
-    page.set_input_files("#import-file", str(filled_book))
-    page.wait_for_selector("svg.chart-head[data-unit=day]")
+    _import(page, filled_book)
 
     months = _months(page)
     assert months, "上段の月が出ていない"
@@ -244,8 +255,7 @@ def test_the_month_shows_in_day_units(page, filled_book):
 
 
 def test_the_chart_unit_can_be_switched(page, filled_book):
-    page.set_input_files("#import-file", str(filled_book))
-    page.wait_for_selector("svg.chart-head[data-unit=day]")
+    _import(page, filled_book)
 
     page.select_option("#chart-unit", "month")
     page.wait_for_selector("svg.chart-head[data-unit=month]")
@@ -554,9 +564,7 @@ def _daily_view(page, book):
     """読み込んで、本日の状況に切り替える。"""
     if page.eval_on_selector("#view", "n => n.value") != "chart":
         page.select_option("#view", "chart")
-    page.set_input_files("#import-file", str(book))
-    page.wait_for_function(
-        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+    _import(page, book)
     page.select_option("#view", "daily")
     page.wait_for_selector(".daily")
 
@@ -632,9 +640,7 @@ def _load_view(page, book):
     """
     if page.eval_on_selector("#view", "n => n.value") == "load":
         page.select_option("#view", "chart")
-    page.set_input_files("#import-file", str(book))
-    page.wait_for_function(
-        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+    _import(page, book)
     page.select_option("#view", "load")
     page.wait_for_selector("table.wbs.load")
     # 月の選択も前のテストから引き継がれるので、先頭に戻しておく

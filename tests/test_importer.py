@@ -119,6 +119,41 @@ def test_holidays_come_from_the_config_sheet(filled_book):
     assert not spec.calendar().is_workday(dt.date(2026, 4, 29))
 
 
+def test_public_holidays_are_always_applied(make_filled):
+    """設定シートに休日一覧があっても、祝日はこのツールが調べて休みにする。
+
+    一覧は書いた時点の期間ぶんしか無いので、日程表を伸ばした先や、
+    手で作ったファイルでは祝日が抜けてしまうため。
+    """
+    path = make_filled("cal.xlsx", start=D(2026, 4, 1), end=None, period_days=60,
+                       rows=[("開発", "", "1", "延びた", D(2026, 4, 6), None,
+                              D(2027, 1, 20), None, None, None, None, None,
+                              "", "設計", "")])
+    calendar = read(path).spec.calendar()
+    assert calendar.is_holiday(D(2026, 4, 29))     # 一覧にある祝日
+    assert calendar.is_holiday(D(2026, 11, 23))    # 一覧の期間より後の祝日
+    assert calendar.is_holiday(D(2027, 1, 1))      # 年をまたいだ祝日
+    assert calendar.is_holiday(D(2027, 1, 11))     # 成人の日
+    assert calendar.is_workday(D(2027, 1, 12))
+
+
+def test_days_off_in_the_config_sheet_are_kept(make_filled):
+    """会社の休業日 (祝日ではない日) は、設定シートのとおり休みにする。"""
+    path = make_filled("off.xlsx", holidays=[D(2026, 12, 30), D(2026, 12, 31)])
+    calendar = read(path).spec.calendar()
+    assert calendar.is_holiday(D(2026, 12, 30))
+    assert calendar.is_holiday(D(2026, 12, 31))
+    assert calendar.is_holiday(D(2026, 11, 23))    # 祝日も合わせて休み
+
+
+def test_saturdays_and_sundays_follow_the_working_days(make_filled):
+    path = make_filled("sat2.xlsx", workdays=["mon", "tue", "wed", "thu", "fri"])
+    calendar = read(path).spec.calendar()
+    assert calendar.is_holiday(D(2026, 4, 18))     # 土
+    assert calendar.is_holiday(D(2026, 4, 19))     # 日
+    assert calendar.is_workday(D(2026, 4, 20))     # 月
+
+
 def test_workdays_come_from_the_config_sheet(make_filled):
     path = make_filled("sat.xlsx", workdays=["mon", "tue", "wed", "thu", "fri", "sat"])
     spec = read(path).spec

@@ -801,8 +801,11 @@ def _build_spec(config, rows: List[Row], book, filename: str, language: str) -> 
         rows=0,
         members=_read_members(book),
         workdays=config.get("workdays") or ["mon", "tue", "wed", "thu", "fri"],
-        # 休日は設定シートの一覧をそのまま使う。無ければ祝日を補う。
-        japanese_holidays=not config.get("holidays"),
+        # 土日は稼働曜日から、祝日はこのツールが調べて休みにする。
+        # 設定シートの「休日一覧」はそこへ足す (会社の休業日が書けるように)。
+        # 一覧は書いた時点の期間ぶんしか無く、日程表を伸ばした先や、
+        # 手で作ったファイルでは祝日が抜けてしまうため。
+        japanese_holidays=True,
         holidays=config.get("holidays") or [],
         language=language,
     )
