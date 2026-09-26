@@ -14,6 +14,7 @@ from . import style
 from .daily import build as build_daily
 from .i18n import labels as get_labels, status_kind
 from .importer import ImportedWBS, Row, resolve
+from .network import build as build_network
 from .timeline import Timeline
 from .workload import build as build_workload
 
@@ -50,7 +51,20 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
         "totals": _totals(rows),
         "workload": _workload(imported, calendar, spec.language),
         "daily": _daily(imported, calendar, today),
+        "network": _network(imported.rows),
     }
+
+
+def _network(rows: List[Row]) -> Dict[str, Any]:
+    """先行関係のネットワーク図。色は表と同じ配色 (状態・担当) を添える。"""
+    model = build_network(rows)
+    by_row = {row.row: row for row in rows}
+    for node in model["nodes"]:
+        row = by_row[node["row"]]
+        background, foreground = _status_color(row.status)
+        node["status_bg"] = background
+        node["status_fg"] = foreground
+    return model
 
 
 def _daily(imported: ImportedWBS, calendar, today: _dt.date) -> Dict[str, Any]:

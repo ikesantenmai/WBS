@@ -82,6 +82,11 @@ const UI = {
     view_chart: 'ガントチャート',
     view_daily: '本日の状況',
     view_load: '要員稼働チェック',
+    view_network: 'ネットワーク図',
+    network_none: '項番の入った行が無いので、ネットワーク図は作れません。',
+    network_info: '{nodes} タスク / 矢印 {edges} 本',
+    network_legend: '凡例：赤い矢印＝先行タスクの終了日より前に始まる予定',
+    network_no_predecessor: '先行タスクなし',
     daily_base: '基準日',
     daily_starting: '本日開始予定',
     daily_ending: '本日終了予定',
@@ -209,6 +214,11 @@ const UI = {
     view_chart: 'Gantt chart',
     view_daily: "Today's status",
     view_load: 'Workload check',
+    view_network: 'Network diagram',
+    network_none: 'No numbered rows, so a network diagram cannot be built.',
+    network_info: '{nodes} tasks / {edges} arrows',
+    network_legend: 'Red arrow = starts before its predecessor is planned to end',
+    network_no_predecessor: 'No predecessor',
     daily_base: 'As of',
     daily_starting: 'Planned to start today',
     daily_ending: 'Planned to end today',
@@ -505,6 +515,7 @@ function render(model) {
   lastView = model;
   if (view === 'load') return renderLoad(model);
   if (view === 'daily') return renderDaily(model);
+  if (view === 'network') return renderNetwork(model);
   return renderChart(model);
 }
 
@@ -845,6 +856,133 @@ function loadColor(count, working) {
   return count >= 3 ? LOAD_COLORS.heavy : LOAD_COLORS.ok;
 }
 
+// ---------------------------------------------------------------- ネットワーク図
+/*
+ * 「先行」欄から読み取った前後関係を、箱と矢印で描く。
+ * 段 (level) を横位置、レーン (lane) を縦位置にする。どちらもサーバ側
+ * (:mod:`wbsgen.network`) で決めてあるので、画面は箱の大きさを掛けるだけでよい。
+ */
+const NETWORK_BOX_W = 208;
+const NETWORK_BOX_H = 76;
+const NETWORK_GAP_X = 64;
+const NETWORK_GAP_Y = 16;
+const NETWORK_PAD = 20;
+
+function renderNetwork(model) {
+  const network = model.network || { nodes: [], edges: [] };
+  const parts = [];
+  if (model.warnings && model.warnings.length) parts.push(warningBox(model.warnings));
+
+  if (!network.nodes.length) {
+    parts.push(el('p', { class: 'empty-note', text: t('network_none') }));
+    $('#sheet').replaceChildren(...parts);
+    $('#preview-info').textContent = '';
+    renderTotals(null);
+    return;
+  }
+
+  parts.push(networkDiagram(network));
+  parts.push(el('p', { class: 'note load-legend', text: t('network_legend') }));
+  $('#sheet').replaceChildren(...parts);
+
+  $('#preview-info').textContent = t('network_info', {
+    nodes: network.nodes.length, edges: network.edges.length,
+  });
+  renderTotals(null);
+}
+
+/** 箱 (HTML) を並べ、矢印は下に敷いた SVG で描く。位置はどちらも同じ式で合わせる。 */
+function networkDiagram(network) {
+  const byRow = new Map(network.nodes.map((node) => [node.row, node]));
+  const levels = Math.max(...network.nodes.map((node) => node.level)) + 1;
+  const lanes = Math.max(...network.nodes.map((node) => node.lane)) + 1;
+  const width = NETWORK_PAD * 2 + levels * NETWORK_BOX_W + (levels - 1) * NETWORK_GAP_X;
+  const height = NETWORK_PAD * 2 + lanes * NETWORK_BOX_H + (lanes - 1) * NETWORK_GAP_Y;
+
+  const arrows = svg('svg', {
+    class: 'network-arrows', width, height, viewBox: `0 0 ${width} ${height}`,
+  });
+  arrows.append(networkMarkers());
+  for (const edge of network.edges) {
+    const from = byRow.get(edge.from);
+    const to = byRow.get(edge.to);
+    if (from && to) arrows.append(networkArrow(networkPos(from), networkPos(to), edge.late));
+  }
+
+  const boxes = el('div', {
+    class: 'network-boxes', style: `width:${width}px;height:${height}px`,
+  });
+  for (const node of network.nodes) {
+    const { x, y } = networkPos(node);
+    boxes.append(networkBox(node, x, y));
+  }
+
+  return el('div', {
+    class: 'network-diagram', style: `width:${width}px;height:${height}px`,
+  }, arrows, boxes);
+}
+
+function networkPos(node) {
+  return {
+    x: NETWORK_PAD + node.level * (NETWORK_BOX_W + NETWORK_GAP_X),
+    y: NETWORK_PAD + node.lane * (NETWORK_BOX_H + NETWORK_GAP_Y),
+  };
+}
+
+function networkMarkers() {
+  const defs = svg('defs', {});
+  for (const [id, color] of [
+    ['network-arrow', 'var(--muted)'],
+    ['network-arrow-late', 'var(--danger)'],
+  ]) {
+    const marker = svg('marker', {
+      id, viewBox: '0 0 10 10', refX: 9, refY: 5,
+      markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse',
+    });
+    marker.append(svg('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color }));
+    defs.append(marker);
+  }
+  return defs;
+}
+
+/** 先行 (右端) から後続 (左端) への、S字にたわむ矢印。 */
+function networkArrow(from, to, late) {
+  const x1 = from.x + NETWORK_BOX_W;
+  const y1 = from.y + NETWORK_BOX_H / 2;
+  const x2 = to.x;
+  const y2 = to.y + NETWORK_BOX_H / 2;
+  const mid = x1 + (x2 - x1) / 2;
+  return svg('path', {
+    d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
+    fill: 'none', stroke: late ? 'var(--danger)' : 'var(--muted)',
+    'stroke-width': late ? 2 : 1.5,
+    'marker-end': `url(#${late ? 'network-arrow-late' : 'network-arrow'})`,
+  });
+}
+
+function networkBox(node, x, y) {
+  const style = `left:${x}px;top:${y}px;width:${NETWORK_BOX_W}px;height:${NETWORK_BOX_H}px`
+    + (node.status_bg ? `;background:${node.status_bg};color:${node.status_fg}` : '');
+  const box = el('div', { class: 'network-box', style, title: networkTooltip(node) });
+  box.append(el('div', { class: 'network-box-head' },
+    el('span', { class: 'network-no', text: node.no }),
+    el('span', { class: 'network-name', text: node.name })));
+  const period = node.start && node.end ? `${shortDate(node.start)} - ${shortDate(node.end)}` : '';
+  box.append(el('div', { class: 'network-box-body' },
+    el('span', { text: period }),
+    el('span', { text: node.member || '' })));
+  if (node.status) box.append(el('div', { class: 'network-status', text: node.status }));
+  return box;
+}
+
+function networkTooltip(node) {
+  const lines = [`${node.no} ${node.name}`.trim()];
+  if (node.start && node.end) lines.push(t('tip_plan', { start: node.start, end: node.end }));
+  if (node.member) lines.push(t('tip_member', { value: node.member }));
+  if (node.status) lines.push(t('tip_status', { value: node.status }));
+  return lines.join('\n');
+}
+
 function warningBox(warnings) {
   return el('div', { class: 'warnings' },
     el('strong', { text: t('warning_title') }),
@@ -1166,6 +1304,7 @@ async function importBytes(name, bytes, unit = null, announce = false) {
     if (token !== importToken) return;
     loaded = { name, bytes };
     fillMonths(model.workload || []);
+    fillNetworkAvailability(model.network);
     setMode('chart');
     $('#chart-unit').value = model.timeline.unit;
     render({
@@ -1178,6 +1317,7 @@ async function importBytes(name, bytes, unit = null, announce = false) {
       warnings: model.warnings,
       workload: model.workload || [],
       daily: model.daily || null,
+      network: model.network || null,
       info: t('info_chart', {
         start: model.timeline.start, end: model.timeline.end,
         columns: model.timeline.columns.length, rows: model.rows.length,
@@ -1224,6 +1364,14 @@ function fillMonths(months) {
   const load = $('#view').querySelector('option[value=load]');
   if (load) load.disabled = months.length === 0;
   if (view === 'load' && !months.length) view = 'chart';
+}
+
+/** 項番の入った行が無いと矢印を引けない。その選択肢だけ止める。 */
+function fillNetworkAvailability(network) {
+  const hasNodes = !!(network && network.nodes.length);
+  const option = $('#view').querySelector('option[value=network]');
+  if (option) option.disabled = !hasNodes;
+  if (view === 'network' && !hasNodes) view = 'chart';
 }
 
 function applyView() {
@@ -1324,7 +1472,7 @@ function fillChoices() {
   $('#unit').value = unit;
   $('#chart-unit').replaceChildren(...options());
   $('#chart-unit').value = chartUnit;
-  $('#view').replaceChildren(...['chart', 'daily', 'load'].map(
+  $('#view').replaceChildren(...['chart', 'daily', 'load', 'network'].map(
     (v) => el('option', { value: v, text: t(`view_${v}`) })));
   $('#view').value = view;
   $('#columns-mode').replaceChildren(...COLUMN_MODES.map(

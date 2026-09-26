@@ -253,6 +253,18 @@ def test_todays_status_reports_a_contradiction(client, make_filled):
     assert found["actual_end_before_start"] == []
 
 
+def test_import_returns_the_network_diagram(client, filled_book):
+    """先行関係のネットワーク図も一緒に返す (画面で切り替えて見られるように)。"""
+    network = _upload(client, filled_book).json()["network"]
+    nos = {node["no"]: node for node in network["nodes"]}
+    assert set(nos) == {"101", "102", "201", "202", "301"}
+    assert nos["101"]["level"] == 0
+    assert nos["301"]["level"] == 4
+    edges = {(edge["from"], edge["to"]) for edge in network["edges"]}
+    # 101 -> 102 -> 201 -> 202 -> 301 の一直線 (行番号は 5 行目から)
+    assert edges == {(5, 6), (6, 7), (7, 8), (8, 9)}
+
+
 def test_the_workload_is_empty_without_owners(client, make_filled):
     path = make_filled("noowner.xlsx", rows=[
         ("開発", "", "1", "A", D(2026, 4, 1), 10, D(2026, 4, 14),

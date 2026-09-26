@@ -151,7 +151,7 @@ def _predecessor_missing(tasks) -> List[int]:
     """先行に書かれた項番が、この表に見つからない。"""
     known = {str(row.no).strip() for row in tasks if str(row.no).strip()}
     return [row.row for row in tasks
-            if any(no not in known for no in _predecessors(row))]
+            if any(no not in known for no in predecessors(row))]
 
 
 def _predecessor_order(tasks) -> List[int]:
@@ -166,7 +166,7 @@ def _predecessor_order(tasks) -> List[int]:
     for row in tasks:
         if not row.start:
             continue
-        for no in _predecessors(row):
+        for no in predecessors(row):
             before = by_no.get(no)
             if before is not None and before.end and before.end > row.start:
                 out.append(row.row)
@@ -174,8 +174,8 @@ def _predecessor_order(tasks) -> List[int]:
     return out
 
 
-def _predecessors(row) -> List[str]:
-    """先行の欄に書かれている項番。"""
+def predecessors(row) -> List[str]:
+    """先行の欄に書かれている項番 (:mod:`wbsgen.network` とも共通)。"""
     return [piece for piece in PREDECESSORS.split(str(row.predecessor or "").strip())
             if piece]
 
@@ -195,4 +195,4 @@ def _idle_members(tasks, names: List[str], base: _dt.date) -> List[str]:
             if not any(name in member for member in today)]
 
 
-__all__ = ["Check", "Digest", "build", "member_names", "split_names"]
+__all__ = ["Check", "Digest", "build", "member_names", "split_names", "predecessors"]

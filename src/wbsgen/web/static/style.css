@@ -299,6 +299,31 @@ table.wbs.daily-list td.name { padding-left: 6px; }
   background: #fff; color: var(--ink); font-size: 12px;
 }
 
+/* ---------------- ネットワーク図 ---------------- */
+.network-diagram { position: relative; margin: 14px; }
+.network-arrows { position: absolute; left: 0; top: 0; display: block; }
+.network-boxes { position: relative; }
+.network-box {
+  position: absolute; display: flex; flex-direction: column; gap: 4px;
+  padding: 7px 9px; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06); font-size: 11px;
+}
+.network-box-head { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.network-no { flex: none; font-weight: 700; color: var(--muted); }
+.network-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 700;
+}
+.network-box-body {
+  display: flex; justify-content: space-between; gap: 6px;
+  color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.network-status {
+  align-self: flex-start; padding: 0 6px; border-radius: 3px; font-size: 10px;
+  background: rgba(0, 0, 0, .06);
+}
+
 
 /* ================================================================
  * スマートフォン (狭い画面)
