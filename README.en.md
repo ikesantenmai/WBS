@@ -492,6 +492,37 @@ so it is split into individual names. Counting then asks whether the name is
 
 No sheet is added when nobody is named. Very long plans stop after 24 months.
 
+### Network diagram
+
+After importing, set **View** to "Network diagram" to see the dependencies
+read from the Predecessor column as a diagram. **Diagram type** switches
+between two ways of drawing it.
+
+- **Precedence diagram (PDM)** — each task is a box, and arrows connect the
+  ones before and after it. This is the common modern style.
+- **Arrow diagram (ADM)** — each task is a labelled arrow, and the points
+  where dependencies join are drawn as circles (events). This is the older
+  PERT-style network diagram.
+
+Both use the same layout. A task's level (its horizontal position) is 0 if it
+has no predecessor, otherwise one past the deepest level among its
+predecessors (a longest-path ordering). Within a level, tasks are placed close
+to the average position of their predecessors, to keep arrows from crossing
+(a barycenter heuristic). An arrow is drawn in red when the task starts before
+its predecessor is planned to end.
+
+In the arrow diagram, a task with more than one predecessor is joined through
+a **dummy arrow** (dashed — it represents no work, only ordering) into a
+single junction event. Tasks that share the exact same set of predecessors
+reuse the same junction event and dummy arrows. Likewise, when several tasks
+have no successor, they are joined by dummy arrows into a single end event.
+
+Rows with no number in the No. column (summary rows with only a group name,
+for example) are left out of both diagrams. A predecessor number that is not
+found in the sheet is simply not drawn as an arrow — that case is reported
+separately by the "Today's status" consistency check ("The predecessor number
+is not in this sheet").
+
 ### API
 
 | Method | Path | Purpose |
@@ -556,6 +587,7 @@ src/wbsgen/
   palette.py     resolving Excel colours (RGB, indexed, theme) for the screen
   workload.py    the workload check per member
   daily.py       today's status (due, delayed, not started, consistency)
+  network.py     building the network diagram (precedence diagram, arrow diagram)
   style.py       colours and formats (taken from the original file)
   workbook.py    writing Excel
   importer.py    reading a filled-in Excel file
