@@ -14,7 +14,7 @@ from . import style
 from .daily import build as build_daily
 from .i18n import labels as get_labels, status_kind
 from .importer import ImportedWBS, Row, resolve
-from .network import build as build_network
+from .network import build as build_precedence, build_arrow
 from .timeline import Timeline
 from .workload import build as build_workload
 
@@ -56,15 +56,19 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
 
 
 def _network(rows: List[Row]) -> Dict[str, Any]:
-    """先行関係のネットワーク図。色は表と同じ配色 (状態・担当) を添える。"""
-    model = build_network(rows)
-    by_row = {row.row: row for row in rows}
-    for node in model["nodes"]:
-        row = by_row[node["row"]]
-        background, foreground = _status_color(row.status)
-        node["status_bg"] = background
-        node["status_fg"] = foreground
-    return model
+    """先行関係のネットワーク図。プレジデンス図 (PDM) とアロー図 (ADM) の両方を
+    組み立てる (画面で切り替えて見られるように)。色は表と同じ配色 (状態) を添える。
+    """
+    precedence = build_precedence(rows)
+    for node in precedence["nodes"]:
+        node["status_bg"], node["status_fg"] = _status_color(node["status"])
+
+    arrow = build_arrow(rows)
+    for activity in arrow["activities"]:
+        if not activity["dummy"]:
+            activity["status_bg"], activity["status_fg"] = _status_color(activity["status"])
+
+    return {"precedence": precedence, "arrow": arrow}
 
 
 def _daily(imported: ImportedWBS, calendar, today: _dt.date) -> Dict[str, Any]:

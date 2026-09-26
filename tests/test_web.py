@@ -253,16 +253,25 @@ def test_todays_status_reports_a_contradiction(client, make_filled):
     assert found["actual_end_before_start"] == []
 
 
-def test_import_returns_the_network_diagram(client, filled_book):
-    """先行関係のネットワーク図も一緒に返す (画面で切り替えて見られるように)。"""
-    network = _upload(client, filled_book).json()["network"]
-    nos = {node["no"]: node for node in network["nodes"]}
+def test_import_returns_the_precedence_diagram(client, filled_book):
+    """先行関係のプレジデンス図も一緒に返す (画面で切り替えて見られるように)。"""
+    precedence = _upload(client, filled_book).json()["network"]["precedence"]
+    nos = {node["no"]: node for node in precedence["nodes"]}
     assert set(nos) == {"101", "102", "201", "202", "301"}
     assert nos["101"]["level"] == 0
     assert nos["301"]["level"] == 4
-    edges = {(edge["from"], edge["to"]) for edge in network["edges"]}
+    edges = {(edge["from"], edge["to"]) for edge in precedence["edges"]}
     # 101 -> 102 -> 201 -> 202 -> 301 の一直線 (行番号は 5 行目から)
     assert edges == {(5, 6), (6, 7), (7, 8), (8, 9)}
+
+
+def test_import_returns_the_arrow_diagram(client, filled_book):
+    """アロー図 (ADM) も一緒に返す。5 本の一直線なので、ダミー矢印は無い。"""
+    arrow = _upload(client, filled_book).json()["network"]["arrow"]
+    assert len(arrow["events"]) == 6                 # 開始 + タスク 5 つぶんの終点
+    assert all(not a["dummy"] for a in arrow["activities"])
+    names = {a["no"]: a["name"] for a in arrow["activities"]}
+    assert names["101"] == "要件定義"
 
 
 def test_the_workload_is_empty_without_owners(client, make_filled):

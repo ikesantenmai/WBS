@@ -3,7 +3,7 @@
 import datetime as dt
 
 from wbsgen.importer import Row
-from wbsgen.network import build
+from wbsgen.network import build, build_arrow
 
 D = dt.date
 
@@ -14,6 +14,14 @@ def _row(number, no, name="作業", **kwargs):
 
 def _node(model, no):
     return next(n for n in model["nodes"] if n["no"] == no)
+
+
+def _activity(model, no):
+    return next(a for a in model["activities"] if not a["dummy"] and a["no"] == no)
+
+
+def _event(model, event_id):
+    return next(e for e in model["events"] if e["id"] == event_id)
 
 
 # ---------------------------------------------------------------- ノード
@@ -118,6 +126,140 @@ def test_lanes_follow_the_predecessors_position():
     # 先行のレーンに引きずられて、段 1 では並びが入れ替わる
     assert _node(model, "4")["lane"] == 0
     assert _node(model, "3")["lane"] == 1
+
+
+# ================================================================
+# アロー図 (ADM)
+# ================================================================
+def test_no_tasks_means_no_events():
+    assert build_arrow([]) == {"events": [], "activities": []}
+
+
+def test_a_single_task_runs_from_the_start_event_to_its_own_head():
+    rows = [_row(2, "1")]
+    model = build_arrow(rows)
+    activity = _activity(model, "1")
+    assert activity["from"] != activity["to"]
+    assert len(model["events"]) == 2
+    # 先行が無いので、開始イベントから始まる
+    starts = [e["id"] for e in model["events"] if e["level"] == 0]
+    assert activity["from"] in starts
+
+
+def test_a_single_predecessor_needs_no_dummy():
+    """先行が 1 つだけなら、その先行の終点にそのままつながる (合流イベント不要)。"""
+    rows = [
+        _row(2, "1"),
+        _row(3, "2", predecessor="1"),
+    ]
+    model = build_arrow(rows)
+    assert all(a["dummy"] is False for a in model["activities"])
+    assert len(model["activities"]) == 2
+    # 「2」の始点は「1」の終点と同じイベント
+    assert _activity(model, "2")["from"] == _activity(model, "1")["to"]
+
+
+def test_several_predecessors_are_merged_with_dummy_arrows():
+    rows = [
+        _row(2, "1"),
+        _row(3, "2"),
+        _row(4, "3", predecessor="1, 2"),
+    ]
+    model = build_arrow(rows)
+    dummies = [a for a in model["activities"] if a["dummy"]]
+    assert len(dummies) == 2
+    merge_event = _activity(model, "3")["from"]
+    sources = {a["from"] for a in dummies}
+    assert sources == {_activity(model, "1")["to"], _activity(model, "2")["to"]}
+    assert all(a["to"] == merge_event for a in dummies)
+
+
+def test_the_same_predecessor_set_shares_one_merge_event():
+    """同じ先行の組を持つタスクどうしは、合流イベントとダミーを使い回す。"""
+    rows = [
+        _row(2, "1"),
+        _row(3, "2"),
+        _row(4, "3", predecessor="1, 2"),
+        _row(5, "4", predecessor="1, 2"),
+        # 3・4 を後続にして、シンク合流のダミーを混ぜずに数える
+        _row(6, "5", predecessor="3, 4"),
+    ]
+    model = build_arrow(rows)
+    assert _activity(model, "3")["from"] == _activity(model, "4")["from"]
+    # 先行の合流はここまでで 2 本 (「1・2」の組を 1 回だけ束ねる)
+    merge_dummies = [a for a in model["activities"]
+                     if a["dummy"] and a["to"] == _activity(model, "3")["from"]]
+    assert len(merge_dummies) == 2
+
+
+def test_several_sinks_are_merged_into_one_end_event():
+    """後続の無いタスクが複数あれば、ダミーで 1 つの終点へ束ねる。"""
+    rows = [
+        _row(2, "1"),
+        _row(3, "2", predecessor="1"),
+        _row(4, "3", predecessor="1"),
+    ]
+    model = build_arrow(rows)
+    dummies = [a for a in model["activities"] if a["dummy"]]
+    ends = {_activity(model, "2")["to"], _activity(model, "3")["to"]}
+    assert len(dummies) == 2
+    assert {d["from"] for d in dummies} == ends
+    assert len({d["to"] for d in dummies}) == 1
+
+
+def test_a_single_sink_needs_no_end_dummy():
+    rows = [_row(2, "1"), _row(3, "2", predecessor="1")]
+    model = build_arrow(rows)
+    assert all(a["dummy"] is False for a in model["activities"])
+
+
+def test_activity_fields_match_the_row():
+    rows = [_row(2, "1", name="要件定義", group="開発", member="設計",
+                 start=D(2026, 4, 1), end=D(2026, 4, 14), progress=0.5,
+                 status="実行中", delay=3)]
+    activity = _activity(build_arrow(rows), "1")
+    assert activity["name"] == "要件定義"
+    assert activity["group"] == "開発"
+    assert activity["member"] == "設計"
+    assert activity["start"] == "2026-04-01"
+    assert activity["end"] == "2026-04-14"
+    assert activity["progress"] == 0.5
+    assert activity["status"] == "実行中"
+    assert activity["delay"] == 3
+
+
+def test_starting_before_a_predecessor_ends_is_flagged_late():
+    rows = [
+        _row(2, "1", start=D(2026, 4, 1), end=D(2026, 4, 18)),
+        _row(3, "2", predecessor="1", start=D(2026, 4, 10), end=D(2026, 4, 20)),
+    ]
+    model = build_arrow(rows)
+    assert _activity(model, "2")["late"] is True
+    assert _activity(model, "1")["late"] is False
+
+
+def test_events_are_laid_out_in_levels_and_lanes():
+    """イベントの段・レーンも、プレジデンス図と同じ考え方で並べる。"""
+    rows = [
+        _row(2, "1"),
+        _row(3, "2"),
+        _row(4, "3", predecessor="1, 2"),
+    ]
+    model = build_arrow(rows)
+    merge_event = _activity(model, "3")["from"]
+    start_event = _activity(model, "1")["from"]
+    task1_head = _activity(model, "1")["to"]
+    assert _event(model, start_event)["level"] == 0
+    assert _event(model, task1_head)["level"] == 1
+    # 合流イベントは、束ねる先行の終点よりさらに 1 段先
+    assert _event(model, merge_event)["level"] == 2
+
+
+def test_an_unknown_predecessor_is_silently_skipped():
+    rows = [_row(2, "1", predecessor="99")]
+    model = build_arrow(rows)
+    assert _activity(model, "1")["from"] == 0     # 開始イベントから始まる
+    assert all(not a["dummy"] for a in model["activities"])
 
 
 def test_a_cycle_does_not_hang():
