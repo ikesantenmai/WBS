@@ -267,7 +267,9 @@ table.wbs.load td.free-days {
 
 /* 一覧は表そのものだけを横に流す (左に貼り付けない) */
 .daily .table-wrap { position: static; overflow-x: auto; padding: 0 14px 12px; }
-table.wbs.daily-list { font-size: 11px; }
+/* 幅は内容に合わせて広げる (大項目・中項目が途切れないように)。列幅は最小幅として働く */
+table.wbs.daily-list { font-size: 11px; table-layout: auto; width: auto; }
+table.wbs.daily-list td.group, table.wbs.daily-list td.subgroup { overflow: visible; }
 table.wbs.daily-list thead th { background: var(--header); }
 table.wbs.daily-list td.name { padding-left: 6px; }
 

@@ -715,7 +715,7 @@ function dailyTable(rows) {
     body.append(tr);
   }
   const width = columns.reduce((total, c) => total + c.width, 0);
-  return el('table', { class: 'wbs daily-list', style: `width:${width}px` },
+  return el('table', { class: 'wbs daily-list', style: `min-width:${width}px` },
             cols, el('thead', {}, head), body);
 }
 
