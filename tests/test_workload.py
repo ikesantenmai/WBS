@@ -157,7 +157,7 @@ def test_a_sheet_is_added_for_every_month(make_filled, tmp_path):
                  tmp_path / "out.xlsx", BASE)
     names = openpyxl.load_workbook(out).sheetnames
     assert names == [SHEET_PLAN, "担当者一覧", "設定", "本日の状況",
-                     "要員稼働チェック_4月", "要員稼働チェック_5月"]
+                     "ネットワーク図", "要員稼働チェック_4月", "要員稼働チェック_5月"]
 
 
 def test_the_sheet_matches_the_layout_of_the_original(make_filled, tmp_path):
@@ -242,7 +242,7 @@ def test_no_sheet_is_added_without_owners(make_filled, tmp_path):
     ])
     out = export(read(path, base_date=BASE), tmp_path / "out.xlsx", BASE)
     assert openpyxl.load_workbook(out).sheetnames == \
-        [SHEET_PLAN, "担当者一覧", "設定", "本日の状況"]
+        [SHEET_PLAN, "担当者一覧", "設定", "本日の状況", "ネットワーク図"]
 
 
 def test_the_sheets_are_translated(make_filled, tmp_path):

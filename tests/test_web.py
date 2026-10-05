@@ -513,3 +513,18 @@ def test_export_follows_the_edits(client, filled_book):
     assert response.status_code == 200
     ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
     assert ws["E5"].value == "改名"
+
+
+def test_export_includes_the_network_diagram(client, filled_book):
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("filled.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    book = openpyxl.load_workbook(io.BytesIO(response.content))
+    assert "ネットワーク図" in book.sheetnames
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        shapes = [zf.read(n).decode() for n in zf.namelist()
+                  if n.startswith("xl/drawings/drawing")]
+    network = [x for x in shapes if "bentConnector3" in x]
+    assert len(network) == 1
+    assert network[0].count("bentConnector3") == 4          # 先行の矢印 4 本
+    assert "node-101" in network[0]

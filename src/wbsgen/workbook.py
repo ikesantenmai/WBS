@@ -33,6 +33,7 @@ from .blank import BlankWBS
 from .daily import Digest, build as build_daily
 from .drawing import Drawing, Geometry, Shape
 from .i18n import Labels, labels as get_labels, status_kind
+from . import netdraw
 from .inject import inject_drawing, sheet_part
 from .timeline import UNIT_DAY, Timeline
 from .workload import WorkloadMonth, build as build_workload
@@ -129,6 +130,10 @@ def write(spec: BlankWBS, path) -> Path:
     return _Writer(spec).save(path)
 
 
+#: ネットワーク図の上端 (見出しと凡例のぶんを空ける)
+NETWORK_TOP_PX = netdraw.CELL_PX * 3
+
+
 def export(imported, path, base_date=None) -> Path:
     """読み込んだ WBS を、ガントチャートの図形つきで書き出す。"""
     from .importer import resolve
@@ -140,7 +145,16 @@ def export(imported, path, base_date=None) -> Path:
     writer = _Writer(spec, rows=imported.rows, base_date=day)
     writer.workload = build_workload(imported.rows, spec.calendar())
     writer.daily = build_daily(imported.rows, spec.calendar(), day)
+    writer.network = _precedence(imported.rows)
     return writer.save(path, source=imported.source)
+
+
+def _precedence(rows):
+    """ネットワーク図 (プレジデンス図) のモデル。項番のある行が無ければ ``None``。"""
+    from .chart import _network
+
+    model = _network(rows)["precedence"]
+    return model if model["nodes"] else None
 
 
 def _md(day: _dt.date, since: _dt.date = None) -> str:
@@ -165,6 +179,8 @@ class _Writer:
         self.workload: List[WorkloadMonth] = []
         #: 本日の状況。``None`` なら作らない (空の WBS には付けない)。
         self.daily: Optional[Digest] = None
+        #: ネットワーク図 (プレジデンス図)。``None`` なら作らない。
+        self.network = None
         self.base_date = base_date or _dt.date.today()
         self.calendar = spec.calendar()
         self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
@@ -200,6 +216,11 @@ class _Writer:
         drawing = self._gantt()
         if len(drawing):
             inject_drawing(path, sheet_part(path, plan.title), drawing.to_xml())
+        if self.network is not None:
+            diagram = netdraw.build(self.network, top_px=NETWORK_TOP_PX)
+            diagram.finalize(netdraw.geometry())
+            inject_drawing(path, sheet_part(path, self.labels.network_sheet),
+                           diagram.to_xml())
         return path
 
     def _base(self, source: bytes):
@@ -226,6 +247,8 @@ class _Writer:
                (text.sheet_config, self._config_sheet)]
         if self.daily is not None:
             out.append((text.daily_sheet, self._daily_sheet))
+        if self.network is not None:
+            out.append((text.network_sheet, self._network_sheet))
         template = (text.load_sheet_dated if _needs_year(self.workload)
                     else text.load_sheet)
         for month in self.workload:
@@ -587,6 +610,23 @@ class _Writer:
             preset="line", fill=None, line_color=style.C_NOWLINE,
             line_width_px=1.25, dash="dash", name="now-line",
         ))
+
+    # ==================================================================
+    # ネットワーク図
+    # ==================================================================
+    def _network_sheet(self, ws: Worksheet) -> None:
+        """見出しと凡例だけをセルに書く。図そのものは図形で重ねる。"""
+        ws.sheet_view.showGridLines = False
+        width, _height = netdraw.size(self.network)
+        for col in range(1, width // netdraw.CELL_PX + 3):
+            ws.column_dimensions[get_column_letter(col)].width = style.px_to_width(
+                netdraw.CELL_PX)
+        ws.sheet_format.defaultRowHeight = netdraw.CELL_PT
+        ws.sheet_format.customHeight = True
+        ws["B1"] = self.labels.network_title
+        ws["B1"].font = style.font(12, bold=True, color=style.C_TITLE_FONT)
+        ws["B2"] = self.labels.network_note
+        ws["B2"].font = style.font(9)
 
     # ==================================================================
     # 担当者一覧

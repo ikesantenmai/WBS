@@ -88,6 +88,10 @@ class Labels:
 
     #: 本日の状況シート
     daily_sheet: str
+    #: ネットワーク図シート
+    network_sheet: str
+    network_title: str
+    network_note: str
     daily_title: str
     daily_note: str
     daily_summary: str
@@ -173,6 +177,10 @@ JA = Labels(
     load_legend="凡例：赤=タスク無し（要対応）／緑=1〜2件／"
                 "橙=3件以上（過負荷の可能性）／灰=非稼働日",
     daily_sheet="本日の状況",
+    network_sheet="ネットワーク図",
+    network_title="◆ネットワーク図（プレジデンス図）",
+    network_note="上段：ES / 日数 / EF、下段：LS / 余裕 / LF（開始からの稼働日数）。"
+                 "太い黒線・太い黒枠＝クリティカルパス、赤い矢印＝先行の終了日より前に始まる予定。",
     daily_title="◆本日の状況（基準日 {date}）",
     daily_note="「{sheet}」から、基準日に手を打つべき行を拾ったものです。",
     daily_summary="◆まとめ",
@@ -280,6 +288,10 @@ EN = Labels(
     load_legend="Red = no task (needs attention) / Green = 1-2 /"
                 " Orange = 3 or more (possibly overloaded) / Grey = non-working day",
     daily_sheet="Today",
+    network_sheet="Network",
+    network_title="\u25c6Network diagram (precedence)",
+    network_note="Top: ES / duration / EF. Bottom: LS / float / LF (working days from the start). "
+                 "Thick black = critical path, red arrow = starts before its predecessor ends.",
     daily_title="\u25c6Today's status (as of {date})",
     daily_note="Rows from \"{sheet}\" that need attention on the base date.",
     daily_summary="\u25c6Summary",

@@ -61,6 +61,7 @@ class Shape:
     alpha: Optional[int] = None           # 透過率 (0-100000 の不透明度)
     adjust: Optional[float] = None        # プリセット図形の調整値
     flip_h: bool = False
+    flip_v: bool = False
     name: str = "shape"
     #: 絶対座標 (EMU)。:meth:`Drawing.finalize` が設定する。
     off: Tuple[int, int] = (0, 0)
@@ -127,7 +128,7 @@ class Drawing:
         return "".join(body)
 
     def _xfrm_xml(self, s: Shape) -> str:
-        flip = ' flipH="1"' if s.flip_h else ""
+        flip = (' flipH="1"' if s.flip_h else "") + (' flipV="1"' if s.flip_v else "")
         return (
             f"<a:xfrm{flip}>"
             f'<a:off x="{s.off[0]}" y="{s.off[1]}"/>'
