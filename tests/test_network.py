@@ -41,6 +41,8 @@ def test_a_node_carries_the_row_fields():
         "row": 2, "no": "1", "name": "要件定義", "group": "開発", "subgroup": "",
         "member": "設計", "start": "2026-04-01", "end": "2026-04-14",
         "progress": 0.5, "status": "実行中", "delay": 3, "level": 0, "lane": 0,
+        "duration": 0, "es": 0, "ef": 0, "ls": 0, "lf": 0, "float": 0,
+        "critical": True,
     }
 
 
@@ -51,7 +53,7 @@ def test_a_predecessor_becomes_an_edge():
         _row(3, "2", predecessor="1", start=D(2026, 4, 15), end=D(2026, 4, 20)),
     ]
     model = build(rows)
-    assert model["edges"] == [{"from": 2, "to": 3, "late": False}]
+    assert model["edges"] == [{"from": 2, "to": 3, "late": False, "critical": True}]
 
 
 def test_several_predecessors_become_several_edges():
@@ -270,3 +272,23 @@ def test_a_cycle_does_not_hang():
     ]
     model = build(rows)
     assert {n["level"] for n in model["nodes"]} == {1, 2}
+
+
+# ---------------------------------------------------------------- ES / EF / LS / LF
+def test_precedence_nodes_carry_the_earliest_and_latest_times():
+    from wbsgen.importer import Row
+    from wbsgen.network import build
+
+    def task(row, no, days, pred=""):
+        return Row(row=row, no=no, name=f"t{no}", days=days, predecessor=pred)
+
+    # 1(3日) → 2(2日) → 4(1日)、1 → 3(5日) → 4。3 を通る道が長い。
+    rows = [task(5, "1", 3), task(6, "2", 2, "1"), task(7, "3", 5, "1"),
+            task(8, "4", 1, "2,3")]
+    nodes = {n["no"]: n for n in build(rows)["nodes"]}
+    assert (nodes["1"]["es"], nodes["1"]["ef"]) == (0, 3)
+    assert (nodes["4"]["es"], nodes["4"]["ef"]) == (8, 9)
+    assert (nodes["2"]["ls"], nodes["2"]["lf"], nodes["2"]["float"]) == (6, 8, 3)
+    assert [n for n in nodes if nodes[n]["critical"]] == ["1", "3", "4"]
+    edges = {(e["from"], e["to"]): e["critical"] for e in build(rows)["edges"]}
+    assert edges[(5, 7)] and edges[(7, 8)] and not edges[(5, 6)]

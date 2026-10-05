@@ -35,8 +35,9 @@ def build(rows: List[Row]) -> Dict[str, Any]:
 
     level = _levels(tasks, by_no)
     lane = _lanes(tasks, level, by_no)
-    nodes = [_node(row, level[row.row], lane[row.row]) for row in tasks]
-    edges = _edges(tasks, by_no)
+    times = _times(tasks, by_no, level)
+    nodes = [_node(row, level[row.row], lane[row.row], times[row.row]) for row in tasks]
+    edges = _edges(tasks, by_no, times)
     return {"nodes": nodes, "edges": edges}
 
 
@@ -208,9 +209,51 @@ def _graph_lanes(nodes: List[int], level: Dict[int, int],
     return lane
 
 
-# ---------------------------------------------------------------- プレジデンス図
-def _node(row: Row, level: int, lane: int) -> Dict[str, Any]:
+# ---------------------------------------------------------------- 最早・最遅
+def _times(tasks: List[Row], by_no: Dict[str, Row],
+           level: Dict[int, int]) -> Dict[int, Dict[str, int]]:
+    """各行の最早開始 (ES)・最早終了 (EF)・最遅開始 (LS)・最遅終了 (LF)・余裕。
+
+    日数 (稼働日) と先行関係だけで数える相対日で、カレンダーの日付とは
+    無関係。先行の無い行は ES=0、プロジェクトの終わりは最も遅い EF。
+    日数が書かれていない行は 0 日として扱う。段が進む向きの矢印だけを
+    使うので、循環参照があっても止まらない。
+    """
+    duration = {row.row: max(int(row.days or 0), 0) for row in tasks}
+    before: Dict[int, List[int]] = {row.row: [] for row in tasks}
+    after: Dict[int, List[int]] = {row.row: [] for row in tasks}
+    for row in tasks:
+        for pred in _valid_predecessors(row, by_no):
+            if level[pred.row] < level[row.row]:
+                before[row.row].append(pred.row)
+                after[pred.row].append(row.row)
+
+    order = sorted(duration, key=lambda key: level[key])
+    es: Dict[int, int] = {}
+    ef: Dict[int, int] = {}
+    for key in order:
+        es[key] = max((ef[p] for p in before[key]), default=0)
+        ef[key] = es[key] + duration[key]
+
+    end = max(ef.values(), default=0)
+    ls: Dict[int, int] = {}
+    lf: Dict[int, int] = {}
+    for key in reversed(order):
+        lf[key] = min((ls[n] for n in after[key]), default=end)
+        ls[key] = lf[key] - duration[key]
+
     return {
+        key: {"duration": duration[key], "es": es[key], "ef": ef[key],
+              "ls": ls[key], "lf": lf[key], "float": ls[key] - es[key]}
+        for key in duration
+    }
+
+
+# ---------------------------------------------------------------- プレジデンス図
+def _node(row: Row, level: int, lane: int, time: Dict[str, int]) -> Dict[str, Any]:
+    return {
+        **time,
+        "critical": time["float"] == 0,
         "row": row.row,
         "no": row.no,
         "name": row.name,
@@ -227,12 +270,19 @@ def _node(row: Row, level: int, lane: int) -> Dict[str, Any]:
     }
 
 
-def _edges(tasks: List[Row], by_no: Dict[str, Row]) -> List[Dict[str, Any]]:
-    """先行のうち、この表に見つかったものだけを矢印にする。"""
+def _edges(tasks: List[Row], by_no: Dict[str, Row],
+           times: Dict[int, Dict[str, int]]) -> List[Dict[str, Any]]:
+    """先行のうち、この表に見つかったものだけを矢印にする。
+
+    ``critical`` は、余裕が 0 の同士をつなぎ、後続の開始を先行の終了が
+    そのまま決めている矢印 (クリティカルパス上の矢印)。
+    """
     return [
         {
             "from": before.row,
             "to": row.row,
+            "critical": (times[before.row]["float"] == 0 and times[row.row]["float"] == 0
+                         and times[before.row]["ef"] == times[row.row]["es"]),
             # 先行タスクの予定終了日より前に始まる予定になっているか
             "late": bool(before.end and row.start and before.end > row.start),
         }

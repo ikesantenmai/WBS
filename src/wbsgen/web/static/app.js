@@ -92,6 +92,13 @@ const UI = {
     network_none: '項番の入った行が無いので、ネットワーク図は作れません。',
     network_info: '{nodes} タスク / 矢印 {edges} 本',
     network_legend: '凡例：赤い矢印＝先行タスクの終了日より前に始まる予定',
+    cpm_es: '最早開始 (ES)',
+    cpm_ef: '最早終了 (EF)',
+    cpm_ls: '最遅開始 (LS)',
+    cpm_lf: '最遅終了 (LF)',
+    cpm_duration: '日数 (稼働日)',
+    cpm_float: '余裕',
+    network_legend_cpm: '上段：ES / 日数 / EF、下段：LS / 余裕 / LF（開始からの稼働日数で、カレンダーの日付ではありません）。太い黒線＝クリティカルパス（余裕 0）。',
     network_dummy: '点線はダミー矢印です（作業を表さず、順序をそろえるためだけの矢印）。',
     network_no_predecessor: '先行タスクなし',
     daily_base: '基準日',
@@ -231,6 +238,13 @@ const UI = {
     network_none: 'No numbered rows, so a network diagram cannot be built.',
     network_info: '{nodes} tasks / {edges} arrows',
     network_legend: 'Red arrow = starts before its predecessor is planned to end',
+    cpm_es: 'Earliest start (ES)',
+    cpm_ef: 'Earliest finish (EF)',
+    cpm_ls: 'Latest start (LS)',
+    cpm_lf: 'Latest finish (LF)',
+    cpm_duration: 'Duration (working days)',
+    cpm_float: 'Float',
+    network_legend_cpm: 'Top: ES / duration / EF. Bottom: LS / float / LF (working days from the start; days are not calendar dates). Thick black = critical path (float 0).',
     network_dummy: 'Dashed lines are dummy arrows (no work — they only enforce ordering).',
     network_no_predecessor: 'No predecessor',
     daily_base: 'As of',
@@ -891,7 +905,7 @@ function renderNetwork(model) {
 
 // ---- プレジデンス図 (PDM) ----------------------------------------------
 const NETWORK_BOX_W = 208;
-const NETWORK_BOX_H = 76;
+const NETWORK_BOX_H = 98;
 const NETWORK_GAP_X = 64;
 const NETWORK_GAP_Y = 16;
 const NETWORK_PAD = 20;
@@ -910,6 +924,7 @@ function renderPrecedenceDiagram(precedence, warnings) {
 
   parts.push(precedenceDiagram(precedence));
   parts.push(el('p', { class: 'note load-legend', text: t('network_legend') }));
+  parts.push(el('p', { class: 'note load-legend', text: t('network_legend_cpm') }));
   $('#sheet').replaceChildren(...parts);
 
   $('#preview-info').textContent = t('network_info', {
@@ -933,7 +948,10 @@ function precedenceDiagram(precedence) {
   for (const edge of precedence.edges) {
     const from = byRow.get(edge.from);
     const to = byRow.get(edge.to);
-    if (from && to) arrows.append(precedenceArrow(precedencePos(from), precedencePos(to), edge.late));
+    if (from && to) {
+      arrows.append(precedenceArrow(precedencePos(from), precedencePos(to),
+                                    edge.late, edge.critical));
+    }
   }
 
   const boxes = el('div', {
@@ -974,7 +992,7 @@ function networkMarkers() {
 }
 
 /** 先行 (右端) から後続 (左端) への、S字にたわむ矢印。 */
-function precedenceArrow(from, to, late) {
+function precedenceArrow(from, to, late, critical) {
   const x1 = from.x + NETWORK_BOX_W;
   const y1 = from.y + NETWORK_BOX_H / 2;
   const x2 = to.x;
@@ -982,16 +1000,28 @@ function precedenceArrow(from, to, late) {
   const mid = x1 + (x2 - x1) / 2;
   return svg('path', {
     d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
-    fill: 'none', stroke: late ? 'var(--danger)' : 'var(--muted)',
-    'stroke-width': late ? 2 : 1.5,
-    'marker-end': `url(#${late ? 'network-arrow-late' : 'network-arrow'})`,
+    fill: 'none',
+    stroke: late ? 'var(--danger)' : (critical ? 'var(--ink)' : 'var(--muted)'),
+    'stroke-width': late || critical ? 2 : 1.5,
+    'marker-end': `url(#${late ? 'network-arrow-late'
+      : (critical ? 'network-arrow-solid' : 'network-arrow')})`,
   });
+}
+
+/** 箱の上下の帯。左から 最早開始 / 日数 (余裕) / 最早終了 などの 3 マス。 */
+function networkTimes(cls, values, titles) {
+  return el('div', { class: `network-times ${cls}` },
+    ...values.map((value, i) => el('span', { text: String(value), title: titles[i] })));
 }
 
 function precedenceBox(node, x, y) {
   const style = `left:${x}px;top:${y}px;width:${NETWORK_BOX_W}px;height:${NETWORK_BOX_H}px`
     + (node.status_bg ? `;background:${node.status_bg};color:${node.status_fg}` : '');
-  const box = el('div', { class: 'network-box', style, title: networkTooltip(node) });
+  const box = el('div', {
+    class: `network-box${node.critical ? ' critical' : ''}`, style, title: networkTooltip(node),
+  });
+  box.append(networkTimes('top', [node.es, node.duration, node.ef],
+                          [t('cpm_es'), t('cpm_duration'), t('cpm_ef')]));
   box.append(el('div', { class: 'network-box-head' },
     el('span', { class: 'network-no', text: node.no }),
     el('span', { class: 'network-name', text: node.name })));
@@ -999,7 +1029,8 @@ function precedenceBox(node, x, y) {
   box.append(el('div', { class: 'network-box-body' },
     el('span', { text: period }),
     el('span', { text: node.member || '' })));
-  if (node.status) box.append(el('div', { class: 'network-status', text: node.status }));
+  box.append(networkTimes('bottom', [node.ls, node.float, node.lf],
+                          [t('cpm_ls'), t('cpm_float'), t('cpm_lf')]));
   return box;
 }
 
@@ -1008,6 +1039,9 @@ function networkTooltip(node) {
   if (node.start && node.end) lines.push(t('tip_plan', { start: node.start, end: node.end }));
   if (node.member) lines.push(t('tip_member', { value: node.member }));
   if (node.status) lines.push(t('tip_status', { value: node.status }));
+  if (node.es !== undefined) {
+    lines.push(`ES ${node.es} / EF ${node.ef} / LS ${node.ls} / LF ${node.lf} / ${t('cpm_float')} ${node.float}`);
+  }
   return lines.join('\n');
 }
 
