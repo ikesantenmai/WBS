@@ -92,6 +92,8 @@ class Labels:
     network_sheet: str
     network_title: str
     network_note: str
+    network_none: str
+    network_skipped: str
     daily_title: str
     daily_note: str
     daily_summary: str
@@ -181,6 +183,9 @@ JA = Labels(
     network_title="◆ネットワーク図（プレジデンス図）",
     network_note="上段：ES / 日数 / EF、下段：LS / 余裕 / LF（開始からの稼働日数）。"
                  "太い黒線・太い黒枠＝クリティカルパス、赤い矢印＝先行の終了日より前に始まる予定。",
+    network_none="項番の入った行が無いので、ネットワーク図は作れません。"
+                 "項番を入れてから (画面の「項番を自動割り当て」でも可) 書き出してください。",
+    network_skipped="項番が空の {count} 行は、図に載せていません。",
     daily_title="◆本日の状況（基準日 {date}）",
     daily_note="「{sheet}」から、基準日に手を打つべき行を拾ったものです。",
     daily_summary="◆まとめ",
@@ -292,6 +297,9 @@ EN = Labels(
     network_title="\u25c6Network diagram (precedence)",
     network_note="Top: ES / duration / EF. Bottom: LS / float / LF (working days from the start). "
                  "Thick black = critical path, red arrow = starts before its predecessor ends.",
+    network_none="No row has a No., so a network diagram cannot be built. "
+                 "Fill in the numbers (or use \"Auto-assign No.\" on screen) and export again.",
+    network_skipped="{count} rows with an empty No. are not shown in the diagram.",
     daily_title="\u25c6Today's status (as of {date})",
     daily_note="Rows from \"{sheet}\" that need attention on the base date.",
     daily_summary="\u25c6Summary",

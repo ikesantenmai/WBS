@@ -528,3 +528,27 @@ def test_export_includes_the_network_diagram(client, filled_book):
     assert len(network) == 1
     assert network[0].count("bentConnector3") == 4          # 先行の矢印 4 本
     assert "node-101" in network[0]
+
+
+def test_export_explains_when_no_row_has_a_number(client, make_filled):
+    from conftest import FILLED_ROWS
+
+    rows = [tuple("" if i == 2 else v for i, v in enumerate(r)) for r in FILLED_ROWS]
+    path = make_filled("nonum.xlsx", rows=rows)
+    with open(path, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("n.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    ws = openpyxl.load_workbook(io.BytesIO(response.content))["ネットワーク図"]
+    assert "項番の入った行が無い" in ws["B2"].value
+
+
+def test_export_notes_the_rows_left_out_of_the_network(client, make_filled):
+    from conftest import FILLED_ROWS
+
+    rows = [list(r) for r in FILLED_ROWS]
+    rows[1][2] = ""
+    path = make_filled("part.xlsx", rows=[tuple(r) for r in rows])
+    with open(path, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("p.xlsx", handle.read(), "x")})
+    ws = openpyxl.load_workbook(io.BytesIO(response.content))["ネットワーク図"]
+    assert "1 行" in ws["B3"].value

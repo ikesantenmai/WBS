@@ -146,15 +146,16 @@ def export(imported, path, base_date=None) -> Path:
     writer.workload = build_workload(imported.rows, spec.calendar())
     writer.daily = build_daily(imported.rows, spec.calendar(), day)
     writer.network = _precedence(imported.rows)
+    writer.network_skipped = sum(1 for row in imported.rows
+                                 if row.name.strip() and not str(row.no).strip())
     return writer.save(path, source=imported.source)
 
 
 def _precedence(rows):
-    """ネットワーク図 (プレジデンス図) のモデル。項番のある行が無ければ ``None``。"""
+    """ネットワーク図 (プレジデンス図) のモデル。項番のある行が無ければ空のモデル。"""
     from .chart import _network
 
-    model = _network(rows)["precedence"]
-    return model if model["nodes"] else None
+    return _network(rows)["precedence"]
 
 
 def _md(day: _dt.date, since: _dt.date = None) -> str:
@@ -181,6 +182,8 @@ class _Writer:
         self.daily: Optional[Digest] = None
         #: ネットワーク図 (プレジデンス図)。``None`` なら作らない。
         self.network = None
+        #: 項番が空で、図に載せなかった行の数
+        self.network_skipped = 0
         self.base_date = base_date or _dt.date.today()
         self.calendar = spec.calendar()
         self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
@@ -216,7 +219,7 @@ class _Writer:
         drawing = self._gantt()
         if len(drawing):
             inject_drawing(path, sheet_part(path, plan.title), drawing.to_xml())
-        if self.network is not None:
+        if self.network is not None and self.network["nodes"]:
             diagram = netdraw.build(self.network, top_px=NETWORK_TOP_PX)
             diagram.finalize(netdraw.geometry())
             inject_drawing(path, sheet_part(path, self.labels.network_sheet),
@@ -625,8 +628,15 @@ class _Writer:
         ws.sheet_format.customHeight = True
         ws["B1"] = self.labels.network_title
         ws["B1"].font = style.font(12, bold=True, color=style.C_TITLE_FONT)
+        if not self.network["nodes"]:
+            ws["B2"] = self.labels.network_none
+            ws["B2"].font = style.font(10, color=style.C_NOWLINE)
+            return
         ws["B2"] = self.labels.network_note
         ws["B2"].font = style.font(9)
+        if self.network_skipped:
+            ws["B3"] = self.labels.network_skipped.format(count=self.network_skipped)
+            ws["B3"].font = style.font(9, color=style.C_NOWLINE)
 
     # ==================================================================
     # 担当者一覧
