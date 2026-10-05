@@ -22,7 +22,7 @@ from .. import __version__, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
 from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
-from ..importer import read as read_workbook
+from ..importer import assign_numbers, read as read_workbook
 from ..timeline import VALID_UNITS, Timeline
 from ..workcal import WEEKDAY_JP, WEEKDAY_KEYS
 
@@ -232,6 +232,35 @@ async def export_workbook(
                 f" filename*=UTF-8''{_filename(imported.spec, _chart_suffix(imported.spec))}",
         },
     )
+
+
+@app.post("/api/number")
+async def number_workbook(
+    file: UploadFile = File(...),
+    lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+) -> Response:
+    """項番が空の行に連番を振った Excel を返す。ほかの中身は変えない。"""
+    language = normalize(lang)
+    imported = await _read_upload(file, None, language)
+    await file.seek(0)
+    try:
+        data, count = assign_numbers(io.BytesIO(await file.read()), language)
+    except SpecError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=wbs.xlsx;"
+                f" filename*=UTF-8''{_filename(imported.spec, _number_suffix(imported.spec))}",
+            "X-Numbered-Rows": str(count),
+        },
+    )
+
+
+def _number_suffix(spec: BlankWBS) -> str:
+    return "_項番" if spec.language == "ja" else "_numbered"
 
 
 @app.get("/", response_class=HTMLResponse)

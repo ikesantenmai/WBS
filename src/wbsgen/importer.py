@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import io
 import unicodedata as _unicodedata
 from copy import copy
 from dataclasses import dataclass, field
@@ -201,6 +202,46 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     spec.title = title
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
                        source=_source_bytes(source) if _has_extra(book) else None)
+
+
+def assign_numbers(source, language: str = DEFAULT_LANGUAGE):
+    """項番が空の行に、上から順に連番を書き込んだ本を返す。
+
+    ``(xlsx のバイト列, 振った件数)`` を返す。すでに書かれている項番は
+    変えず、その番号も使わない (先行の欄が指している番号を動かさないため)。
+    項目名の無い行 (まとめ行など) には振らない。
+    """
+    lang = normalize(language)
+    raw = _source_bytes(source)
+    if raw is None:
+        raise SpecError(message(lang, "not_excel", reason="unreadable"))
+    imported = read(io.BytesIO(raw), language=lang)
+    try:
+        # 書き戻すので、計算結果ではなく数式を読む
+        book = load_workbook(io.BytesIO(raw), data_only=False)
+    except Exception as exc:  # noqa: BLE001
+        raise SpecError(message(lang, "not_excel", reason=exc))
+    sheet, _header_row, columns = _pick_plan_sheet(book, lang)
+    if "no" not in columns:
+        raise SpecError(message(lang, "no_number_column"))
+
+    used = {row.no for row in imported.rows if row.no}
+    count, number = 0, 0
+    for row in imported.rows:
+        if row.no or not row.name.strip():
+            continue
+        number += 1
+        while str(number) in used:
+            number += 1
+        cell = sheet.cell(row=row.row, column=columns["no"])
+        if type(cell).__name__ == "MergedCell":
+            continue
+        cell.value = number
+        count += 1
+
+    out = io.BytesIO()
+    book.save(out)
+    return out.getvalue(), count
 
 
 #: 導出のたびに書かれた値へ戻す項目

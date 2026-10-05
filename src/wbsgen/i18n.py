@@ -405,6 +405,7 @@ MESSAGES = {
         "upload_too_large": "ファイルが大きすぎます (上限 {limit}MB)",
         "unsupported_format": "対応していない形式です: {suffix} — .xlsx を指定してください",
         "no_suffix": "(拡張子なし)",
+        "no_number_column": "「項番」の列が見つかりません。",
         "no_rows": "記入された行が見つかりません。"
                    "項目と日付を入れてから読み込んでください。",
     },
@@ -442,6 +443,7 @@ MESSAGES = {
         "upload_too_large": "The file is too large ({limit}MB maximum)",
         "unsupported_format": "Unsupported format: {suffix} - please choose an .xlsx file",
         "no_suffix": "(no extension)",
+        "no_number_column": "No \"No.\" column found.",
         "no_rows": "No filled-in rows found."
                    " Please enter tasks and dates before importing.",
     },

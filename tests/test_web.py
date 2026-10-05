@@ -459,3 +459,20 @@ def test_export_filename_follows_the_language(client, filled_book, lang, marker)
         response = client.post("/api/export", params={"lang": lang},
                                files={"file": ("filled.xlsx", handle.read(), "x")})
     assert marker in response.headers["content-disposition"]
+
+
+# ---------------------------------------------------------------- number
+def test_number_fills_only_the_empty_numbers(client, make_filled):
+    from conftest import FILLED_ROWS
+
+    rows = [list(r) for r in FILLED_ROWS]
+    rows[1][2] = ""             # 102 を空にする
+    rows[3][2] = ""
+    path = make_filled(rows=[tuple(r) for r in rows])
+    with open(path, "rb") as handle:
+        response = client.post("/api/number", files={"file": ("filled.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    assert response.headers["x-numbered-rows"] == "2"
+    ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
+    assert [ws[f"D{r}"].value for r in range(5, 10)] == ["101", 1, "201", 2, "301"]
+    assert ws["E5"].value == "要件定義"

@@ -57,6 +57,9 @@ const UI = {
     import: 'Excel を読み込む',
     back: '新規作成に戻る',
     export: 'ガントチャート付きで書き出す',
+    number: '項番を自動割り当て',
+    busy_number: '項番を振っています…',
+    numbered: '{name} を書き出しました。項番を {n} 行に振りました。',
     download: 'Excel をダウンロード',
     section_period: '期間',
     section_sheet: '用紙',
@@ -193,6 +196,9 @@ const UI = {
     import: 'Import Excel',
     back: 'Back to new sheet',
     export: 'Export with Gantt chart',
+    number: 'Auto-assign No.',
+    busy_number: 'Assigning numbers…',
+    numbered: 'Saved {name}. Numbered {n} rows.',
     download: 'Download Excel',
     section_period: 'Period',
     section_sheet: 'Sheet',
@@ -1499,6 +1505,7 @@ function setMode(next) {
   applyView();
   $('#btn-back').hidden = !chart;
   $('#btn-export').hidden = !chart;
+  $('#btn-number').hidden = !chart;
   $('#btn-build').hidden = chart;
   $('#preview-title').textContent = t(chart ? 'chart' : 'preview');
   $('#preview-hint').textContent = t(chart ? 'hint_chart' : 'hint_blank');
@@ -1685,6 +1692,7 @@ function bind() {
   $('#spec-form').addEventListener('submit', (event) => event.preventDefault());
   $('#btn-build').addEventListener('click', download);
   $('#btn-export').addEventListener('click', exportChart);
+  $('#btn-number').addEventListener('click', numberRows);
   $('#btn-back').addEventListener('click', () => {
     importToken += 1;   // 読み込み中なら、その結果は捨てる
     loaded = null;
@@ -1747,6 +1755,15 @@ function exportChart() {
               { method: 'POST', body });
 }
 
+/** 項番が空の行に連番を振った Excel を書き出す。 */
+function numberRows() {
+  if (!loaded) return Promise.resolve();
+  const body = new FormData();
+  body.append('file', new Blob([loaded.bytes]), loaded.name);
+  return save($('#btn-number'), 'busy_number', `/api/number?lang=${language}`,
+              { method: 'POST', body }, 'numbered');
+}
+
 /**
  * 受け取った中身をファイルとして保存させる。
  *
@@ -1761,7 +1778,7 @@ function saveBlob(blob, name) {
   setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, SAVE_KEEP_MS);
 }
 
-async function save(button, busyKey, path, options) {
+async function save(button, busyKey, path, options, doneKey = 'saved') {
   button.disabled = true;
   startBusy(busyKey);
   try {
@@ -1771,7 +1788,8 @@ async function save(button, busyKey, path, options) {
     const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
     const name = match ? decodeURIComponent(match[1]) : 'wbs.xlsx';
     saveBlob(blob, name);
-    banner(t('saved', { name }), true);
+    const n = response.headers.get('X-Numbered-Rows');
+    banner(t(doneKey, { name, n }), true);
   } catch (error) {
     banner(t('cannot_save', { reason: error.message }));
   } finally {
