@@ -204,18 +204,80 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
                        source=_source_bytes(source) if _has_extra(book) else None)
 
 
-def assign_numbers(source, language: str = DEFAULT_LANGUAGE):
+def _edit_converters():
+    """画面から編集できる項目と、書かれた文字を値に直す関数。"""
+    return {
+        "group": _text, "subgroup": _text, "no": _text, "name": _name_text,
+        "start": _date, "days": _int, "end": _date,
+        "actual_start": _date, "actual_days": _int, "actual_end": _date,
+        "delay": _int, "progress": _ratio, "effort": _number,
+        "predecessor": _text, "member": _text, "status": _text,
+    }
+
+
+def apply_edits(imported: ImportedWBS, edits, language: str = DEFAULT_LANGUAGE,
+                base_date: Optional[_dt.date] = None) -> ImportedWBS:
+    """画面で書き換えられた値を行に反映して、導出をやり直す。
+
+    ``edits`` は ``{行番号: {項目名: 書かれた文字}}``。元のファイルには
+    触れず、読み込んだ行だけを書き換える。書かれた値として控え直すので、
+    日数・終了日・進捗・状態は :func:`resolve` が数え直す。
+
+    予定の日数だけを書き換えたときは、終了日を日数から求め直す
+    (終了日が残っていると、日数のほうが捨てられてしまうため)。
+    読めない値があれば、すべて集めて :class:`SpecError` にする。
+    """
+    lang = normalize(language)
+    text = labels(lang)
+    by_row = {row.row: row for row in imported.rows}
+    converters = _edit_converters()
+    errors: List[str] = []
+
+    for raw_index, fields in (edits or {}).items():
+        try:
+            row = by_row.get(int(raw_index))
+        except (TypeError, ValueError):
+            row = None
+        if row is None or not isinstance(fields, dict):
+            continue
+        for key, raw in fields.items():
+            convert = converters.get(key)
+            if convert is None:
+                continue
+            try:
+                value = convert(raw)
+            except ValueError as exc:
+                errors.append(message(
+                    lang, "cell_prefix", row=row.row,
+                    column=text.columns.get(key, key), reason=_reason(exc, lang)))
+                continue
+            setattr(row, key, value)
+            if key in WRITTEN_FIELDS:
+                row.written[key] = value
+        if "days" in fields and "end" not in fields:
+            row.end = None
+            row.written["end"] = None
+
+    if errors:
+        raise SpecError("\n".join(errors))
+    resolve(imported.rows, imported.spec.calendar(), base_date, lang)
+    return imported
+
+
+def assign_numbers(source, language: str = DEFAULT_LANGUAGE, edits=None):
     """項番が空の行に、上から順に連番を書き込んだ本を返す。
 
     ``(xlsx のバイト列, 振った件数)`` を返す。すでに書かれている項番は
     変えず、その番号も使わない (先行の欄が指している番号を動かさないため)。
     項目名の無い行 (まとめ行など) には振らない。
+    ``edits`` (画面で書き換え中の値) は、項番の判断にだけ使う。項番を書き
+    換えた行には振らない。
     """
     lang = normalize(language)
     raw = _source_bytes(source)
     if raw is None:
         raise SpecError(message(lang, "not_excel", reason="unreadable"))
-    imported = read(io.BytesIO(raw), language=lang)
+    imported = apply_edits(read(io.BytesIO(raw), language=lang), edits, lang)
     try:
         # 書き戻すので、計算結果ではなく数式を読む
         book = load_workbook(io.BytesIO(raw), data_only=False)
@@ -228,7 +290,7 @@ def assign_numbers(source, language: str = DEFAULT_LANGUAGE):
     used = {row.no for row in imported.rows if row.no}
     count, number = 0, 0
     for row in imported.rows:
-        if row.no or not row.name.strip():
+        if row.no or not row.name.strip() or "no" in (edits or {}).get(str(row.row), {}):
             continue
         number += 1
         while str(number) in used:

@@ -406,6 +406,7 @@ MESSAGES = {
         "unsupported_format": "対応していない形式です: {suffix} — .xlsx を指定してください",
         "no_suffix": "(拡張子なし)",
         "no_number_column": "「項番」の列が見つかりません。",
+        "bad_edits": "編集内容を読み取れません。",
         "no_rows": "記入された行が見つかりません。"
                    "項目と日付を入れてから読み込んでください。",
     },
@@ -444,6 +445,7 @@ MESSAGES = {
         "unsupported_format": "Unsupported format: {suffix} - please choose an .xlsx file",
         "no_suffix": "(no extension)",
         "no_number_column": "No \"No.\" column found.",
+        "bad_edits": "The edits could not be read.",
         "no_rows": "No filled-in rows found."
                    " Please enter tasks and dates before importing.",
     },

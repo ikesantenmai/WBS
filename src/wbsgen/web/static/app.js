@@ -57,6 +57,10 @@ const UI = {
     import: 'Excel を読み込む',
     back: '新規作成に戻る',
     export: 'ガントチャート付きで書き出す',
+    recalc: '再計算',
+    recalc_count: '再計算 ({n} 件の変更)',
+    recalculated: '再計算しました。ガントチャート・本日の状況・要員稼働・ネットワーク図を更新しました。',
+    edit_note: '表のセルは書き換えられます。書き換えたら「再計算」で、すべての表示に反映します（日数・遅れ・状態は日付から計算し直します）。',
     number: '項番を自動割り当て',
     busy_number: '項番を振っています…',
     numbered: '項番を {n} 行に振りました。',
@@ -203,6 +207,10 @@ const UI = {
     import: 'Import Excel',
     back: 'Back to new sheet',
     export: 'Export with Gantt chart',
+    recalc: 'Recalculate',
+    recalc_count: 'Recalculate ({n} changes)',
+    recalculated: 'Recalculated. The Gantt chart, today\'s status, workload and network diagram are updated.',
+    edit_note: 'Table cells are editable. Press Recalculate to update every view (days, delay and status are recalculated from the dates).',
     number: 'Auto-assign No.',
     busy_number: 'Assigning numbers…',
     numbered: 'Numbered {n} rows.',
@@ -384,7 +392,8 @@ let meta = null;
 let workdays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 let mode = 'blank';        // 'blank' = 新規作成 / 'chart' = 読み込んだ WBS
 let pending = null;
-let loaded = null;         // 読み込んだファイルの名前と中身 ({ name, bytes })
+let loaded = null;         // 読み込んだファイルの名前と中身 ({ name, bytes, edits })
+let cellEdits = {};        // 表で書き換え中 (まだ再計算していない) の値 ({ 行: { 項目: 文字 } })
 let importToken = 0;       // 読み込みの通し番号 (古い応答を捨てるため)
 let pane = 'form';         // 狭い画面でどちらを見せているか ('form' / 'preview')
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
@@ -1222,7 +1231,28 @@ function buildTable(view, rowCount, withWeekday) {
 function tableCell(row, column, previous) {
   const td = el('td', { class: `${column.cls || ''}${column.plan ? ' plan' : ''}` });
   if (!row) return td;
+  const cell = tableCellContent(td, row, column, previous);
+  if (mode === 'chart') makeEditable(cell, row, column);
+  return cell;
+}
 
+/** 読み込んだ表のセルを、その場で書き換えられるようにする。 */
+function makeEditable(td, row, column) {
+  const key = column.key;
+  td.dataset.row = row.row;
+  td.dataset.key = key;
+  td.dataset.orig = td.textContent;
+  td.contentEditable = 'plaintext-only';
+  td.spellcheck = false;
+  const edited = cellEdits[row.row] && cellEdits[row.row][key];
+  if (edited !== undefined) {
+    td.textContent = edited;
+    td.classList.add('edited');
+    td.classList.remove('derived');
+  }
+}
+
+function tableCellContent(td, row, column, previous) {
   let value = row[column.key];
   // 大項目・中項目は変わったところにだけ出す (Excel と同じ見え方)
   if ((column.key === 'group' || column.key === 'subgroup')
@@ -1475,6 +1505,7 @@ async function importFile(file) {
     banner(t('cannot_import', { reason: error.message }));
     return;
   }
+  cellEdits = {};
   return importBytes(file.name, bytes, DEFAULT_CHART_UNIT, true);
 }
 
@@ -1482,9 +1513,10 @@ async function importFile(file) {
  * 持っている中身を送って読み込む (表示単位を変えたときは読み直す)。
  * ``announce`` は「読み込みました」を出すかどうか。
  */
-async function importBytes(name, bytes, unit = null, announce = false) {
+async function importBytes(name, bytes, unit = null, announce = false, edits = null) {
   const body = new FormData();
   body.append('file', new Blob([bytes]), name);
+  appendEdits(body, edits);
   const query = unit ? `&unit=${encodeURIComponent(unit)}` : '';
   const token = ++importToken;
   startBusy('busy_import', { name });
@@ -1493,8 +1525,8 @@ async function importBytes(name, bytes, unit = null, announce = false) {
                                { method: 'POST', body });
     const model = await response.json();
     // 待っている間に「戻る」や別の読み込みが起きていたら、この結果は捨てる
-    if (token !== importToken) return;
-    loaded = { name, bytes };
+    if (token !== importToken) return false;
+    loaded = { name, bytes, edits: edits || {} };
     fillMonths(model.workload || []);
     fillNetworkAvailability(model.network);
     setMode('chart');
@@ -1516,9 +1548,11 @@ async function importBytes(name, bytes, unit = null, announce = false) {
       }),
     });
     if (announce) banner(t('imported', { name }), true);
+    return true;
   } catch (error) {
-    if (token !== importToken) return;
+    if (token !== importToken) return false;
     banner(t('cannot_import', { reason: error.message }));
+    return false;
   } finally {
     endBusy();
   }
@@ -1540,6 +1574,8 @@ function setMode(next) {
   $('#btn-back').hidden = !chart;
   $('#btn-export').hidden = !chart;
   $('#btn-number').hidden = !chart;
+  $('#btn-recalc').hidden = !chart;
+  updateRecalc();
   $('#btn-build').hidden = chart;
   $('#preview-title').textContent = t(chart ? 'chart' : 'preview');
   $('#preview-hint').textContent = t(chart ? 'hint_chart' : 'hint_blank');
@@ -1632,6 +1668,7 @@ function applyLanguage() {
   $('#preview-title').textContent = t(mode === 'chart' ? 'chart' : 'preview');
   $('#preview-hint').textContent = t(mode === 'chart' ? 'hint_chart' : 'hint_blank');
   $('#tagline').textContent = t(mode === 'chart' ? 'tagline_chart' : 'tagline_blank');
+  updateRecalc();
 }
 
 /** 言語を切り替え、選択肢と表示を作り直す。 */
@@ -1652,7 +1689,7 @@ async function switchLanguage(value) {
   $('#title').placeholder = suggestedTitle;
 
   if (mode === 'chart' && loaded) {
-    await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value);
+    await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value, false, loaded.edits);
   }
   else await refresh();
 }
@@ -1727,9 +1764,19 @@ function bind() {
   $('#btn-build').addEventListener('click', download);
   $('#btn-export').addEventListener('click', exportChart);
   $('#btn-number').addEventListener('click', numberRows);
+  $('#btn-recalc').addEventListener('click', recalc);
+  // 表のセルの書き換え (表は描き直されるので、親でまとめて受ける)
+  $('#sheet').addEventListener('input', onCellEdit);
+  $('#sheet').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target.matches('td[data-key]')) {
+      event.preventDefault();
+      event.target.blur();
+    }
+  });
   $('#btn-back').addEventListener('click', () => {
     importToken += 1;   // 読み込み中なら、その結果は捨てる
     loaded = null;
+    cellEdits = {};
     setMode('blank');
     banner('');
     refresh();
@@ -1748,7 +1795,7 @@ function bind() {
     redraw();
   });
   $('#chart-unit').addEventListener('change', () => {
-    if (loaded) importBytes(loaded.name, loaded.bytes, $('#chart-unit').value);
+    if (loaded) importBytes(loaded.name, loaded.bytes, $('#chart-unit').value, false, loaded.edits);
   });
   $('#import-file').addEventListener('change', (event) => {
     const file = event.target.files[0];
@@ -1783,10 +1830,91 @@ function exportChart() {
   if (!loaded) return Promise.resolve();
   const body = new FormData();
   body.append('file', new Blob([loaded.bytes]), loaded.name);
+  appendEdits(body, loaded.edits);
   const unit = $('#chart-unit').value;
   return save($('#btn-export'), 'busy_export',
               `/api/export?lang=${language}&unit=${encodeURIComponent(unit)}`,
               { method: 'POST', body });
+}
+
+/** 書き換えた値 (空でなければ) を、送る本文に付ける。 */
+function appendEdits(body, edits) {
+  if (edits && Object.keys(edits).length) body.append('edits', JSON.stringify(edits));
+}
+
+/** これまでの編集に、書き換え中の分を重ねる (同じ項目は新しいほうが勝つ)。 */
+function mergeEdits(base, extra) {
+  const out = {};
+  for (const source of [base || {}, extra || {}]) {
+    for (const [row, fields] of Object.entries(source)) {
+      out[row] = { ...(out[row] || {}), ...fields };
+    }
+  }
+  return out;
+}
+
+function pendingCount() {
+  return Object.values(cellEdits).reduce((n, fields) => n + Object.keys(fields).length, 0);
+}
+
+/** 書き換えた件数を、再計算ボタンに出す。 */
+function updateRecalc() {
+  const count = pendingCount();
+  const button = $('#btn-recalc');
+  button.textContent = count ? t('recalc_count', { n: count }) : t('recalc');
+  button.classList.toggle('primary', count > 0);
+  button.title = t('edit_note');
+}
+
+/**
+ * 書き換えた値を取り込み、ガントチャートも本日の状況もネットワーク図も
+ * まとめて計算し直す。読めない値があれば、そのまま残して知らせる。
+ */
+async function recalc() {
+  if (!loaded) return;
+  const edits = mergeEdits(loaded.edits, cellEdits);
+  const button = $('#btn-recalc');
+  button.disabled = true;
+  const done = await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value,
+                                 false, edits);
+  button.disabled = false;
+  if (done) {
+    cellEdits = {};
+    updateRecalc();
+    redraw();
+    banner(t('recalculated'), true);
+  }
+}
+
+/** 表のセルを書き換えたとき、元の表示と違えば控える (同じに戻せば取り消す)。 */
+function onCellEdit(event) {
+  const td = event.target.closest('td[data-key]');
+  if (!td) return;
+  const row = td.dataset.row;
+  const key = td.dataset.key;
+  const text = td.textContent.trim();
+  const same = text === td.dataset.orig.trim();
+  if (same) {
+    if (cellEdits[row]) {
+      delete cellEdits[row][key];
+      if (!Object.keys(cellEdits[row]).length) delete cellEdits[row];
+    }
+  } else {
+    const model = lastView && lastView.rows.find((r) => String(r.row) === row);
+    const value = model && /start|end$/.test(key) && key !== 'delay' ? withYear(model, key, text) : text;
+    cellEdits[row] = { ...(cellEdits[row] || {}), [key]: value };
+  }
+  td.classList.toggle('edited', !same);
+  updateRecalc();
+}
+
+/** 日付の「4/1」のような年の無い書き方に、その行の年を補う。 */
+function withYear(row, key, text) {
+  const short = /^(\d{1,2})[/-](\d{1,2})$/.exec(text);
+  if (!short) return text;
+  const year = ((row[key] || row.start || row.actual_start || '').slice(0, 4))
+    || String(new Date().getFullYear());
+  return `${year}-${short[1]}-${short[2]}`;
 }
 
 /**
@@ -1798,13 +1926,14 @@ async function numberRows() {
   const button = $('#btn-number');
   const body = new FormData();
   body.append('file', new Blob([loaded.bytes]), loaded.name);
+  appendEdits(body, loaded.edits);
   button.disabled = true;
   startBusy('busy_number');
   let count;
   try {
     const response = await api(`/api/number?lang=${language}`, { method: 'POST', body });
     count = response.headers.get('X-Numbered-Rows');
-    loaded = { name: loaded.name, bytes: await response.arrayBuffer() };
+    loaded = { name: loaded.name, bytes: await response.arrayBuffer(), edits: loaded.edits };
   } catch (error) {
     banner(t('cannot_save', { reason: error.message }));
     return;
@@ -1812,7 +1941,7 @@ async function numberRows() {
     button.disabled = false;
     endBusy();
   }
-  await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value);
+  await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value, false, loaded.edits);
   banner(t('numbered', { n: count }), true);
 }
 

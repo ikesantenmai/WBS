@@ -476,3 +476,40 @@ def test_number_fills_only_the_empty_numbers(client, make_filled):
     ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
     assert [ws[f"D{r}"].value for r in range(5, 10)] == ["101", 1, "201", 2, "301"]
     assert ws["E5"].value == "要件定義"
+
+
+# ---------------------------------------------------------------- edits
+def _post_edits(client, path, edits, url="/api/import"):
+    import json
+
+    with open(path, "rb") as handle:
+        return client.post(url, files={"file": ("filled.xlsx", handle.read(), "x")},
+                           data={"edits": json.dumps(edits)})
+
+
+def test_import_applies_edits_and_recalculates(client, filled_book):
+    # 5 行目 = 要件定義、7 行目 = 詳細設計 (開始 5/8)
+    response = _post_edits(client, filled_book, {
+        "5": {"name": "要件定義(改)", "progress": "50%"},
+        "7": {"days": "30"},
+    })
+    assert response.status_code == 200
+    rows = {r["row"]: r for r in response.json()["rows"]}
+    assert rows[5]["name"] == "要件定義(改)"
+    assert rows[7]["days"] == 30
+    assert rows[7]["end"] > "2026-06-01"          # 日数から終了日を求め直した
+    assert response.json()["network"]["precedence"]["nodes"]
+
+
+def test_import_rejects_an_unreadable_edit(client, filled_book):
+    response = _post_edits(client, filled_book, {"6": {"start": "どこか"}})
+    assert response.status_code == 422
+    assert "6 行目" in response.json()["detail"]
+
+
+def test_export_follows_the_edits(client, filled_book):
+    response = _post_edits(client, filled_book, {"5": {"name": "改名"}},
+                           url="/api/export")
+    assert response.status_code == 200
+    ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
+    assert ws["E5"].value == "改名"

@@ -9,12 +9,13 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import io
+import json
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -22,7 +23,7 @@ from .. import __version__, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
 from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
-from ..importer import assign_numbers, read as read_workbook
+from ..importer import apply_edits, assign_numbers, read as read_workbook
 from ..timeline import VALID_UNITS, Timeline
 from ..workcal import WEEKDAY_JP, WEEKDAY_KEYS
 
@@ -169,17 +170,35 @@ async def import_workbook(
     file: UploadFile = File(...),
     unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+    edits: Optional[str] = Form(None, description="画面で書き換えた値 (JSON)"),
 ) -> Dict[str, Any]:
     """記入済みの Excel を読み込み、ガントチャートの描画モデルを返す。
 
     ``unit`` を渡すと、ファイルに書かれた表示単位より優先する
     (同じ内容を日/週/月で見比べるため)。
     """
-    return build_chart(await _read_upload(file, unit, normalize(lang)))
+    return build_chart(await _read_upload(file, unit, normalize(lang), edits))
 
 
-async def _read_upload(file: UploadFile, unit: Optional[str], language: str):
-    """アップロードされた Excel を読み込む (import / export で共通)。"""
+def _parse_edits(edits: Optional[str], language: str) -> Dict[str, Any]:
+    """画面から送られた編集内容 (JSON) を辞書にする。"""
+    if not edits:
+        return {}
+    try:
+        parsed = json.loads(edits)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail=message(language, "bad_edits"))
+    return parsed
+
+
+async def _read_upload(file: UploadFile, unit: Optional[str], language: str,
+                       edits: Optional[str] = None):
+    """アップロードされた Excel を読み込む (import / export で共通)。
+
+    ``edits`` があれば、画面で書き換えられた値を反映する。
+    """
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=message(
@@ -204,6 +223,10 @@ async def _read_upload(file: UploadFile, unit: Optional[str], language: str):
 
     if not imported.rows:
         raise HTTPException(status_code=422, detail=message(language, "no_rows"))
+    try:
+        apply_edits(imported, _parse_edits(edits, language), language)
+    except SpecError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     return imported
 
 
@@ -212,12 +235,13 @@ async def export_workbook(
     file: UploadFile = File(...),
     unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+    edits: Optional[str] = Form(None, description="画面で書き換えた値 (JSON)"),
 ) -> Response:
     """記入済みの Excel を読み込み、ガントチャートを描き込んで返す。
 
     画面に出しているのと同じバーを、浮動図形として書き込む。
     """
-    imported = await _read_upload(file, unit, normalize(lang))
+    imported = await _read_upload(file, unit, normalize(lang), edits)
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "wbs.xlsx"
         workbook.export(imported, path)
@@ -238,13 +262,15 @@ async def export_workbook(
 async def number_workbook(
     file: UploadFile = File(...),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+    edits: Optional[str] = Form(None, description="画面で書き換えた値 (JSON)"),
 ) -> Response:
     """項番が空の行に連番を振った Excel を返す。ほかの中身は変えない。"""
     language = normalize(lang)
-    imported = await _read_upload(file, None, language)
+    imported = await _read_upload(file, None, language, edits)
     await file.seek(0)
     try:
-        data, count = assign_numbers(io.BytesIO(await file.read()), language)
+        data, count = assign_numbers(io.BytesIO(await file.read()), language,
+                                     _parse_edits(edits, language))
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return Response(

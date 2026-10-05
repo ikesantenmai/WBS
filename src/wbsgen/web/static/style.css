@@ -212,6 +212,13 @@ table.wbs td.status span {
   display: inline-block; min-width: 52px; padding: 0 4px;
   border-radius: 3px; font-size: 10px;
 }
+table.wbs td[contenteditable] { cursor: text; }
+table.wbs td[contenteditable]:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+table.wbs td[contenteditable]:focus {
+  outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; color: var(--ink);
+  overflow: visible; text-overflow: clip;
+}
+table.wbs td.edited { background: #fff3c4 !important; color: var(--ink) !important; font-style: normal; }
 table.wbs td.derived { color: #999; font-style: italic; }
 table.wbs td.chart.rest { background: var(--holiday); }
 table.wbs td.chart.saturday { background: var(--saturday); }
