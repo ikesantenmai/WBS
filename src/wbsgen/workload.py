@@ -112,7 +112,7 @@ def build(rows, calendar, base_date: Optional[_dt.date] = None) -> List[Workload
     """
     spans = [(row.start, row.end) for row in rows
              if row.start and row.end and row.end >= row.start]
-    tasks = [(row.start, row.end, str(row.member), row.row)
+    tasks = [(row.start, row.end, str(row.member), getattr(row, "row", 0))
              for row in rows
              if row.start and row.end and row.end >= row.start and row.member]
     names = member_names(rows)
