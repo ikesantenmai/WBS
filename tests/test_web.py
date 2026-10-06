@@ -552,3 +552,13 @@ def test_export_notes_the_rows_left_out_of_the_network(client, make_filled):
         response = client.post("/api/export", files={"file": ("p.xlsx", handle.read(), "x")})
     ws = openpyxl.load_workbook(io.BytesIO(response.content))["ネットワーク図"]
     assert "1 行" in ws["B3"].value
+
+
+def test_workload_lists_the_tasks_behind_every_count(client, filled_book):
+    with open(filled_book, "rb") as handle:
+        body = client.post("/api/import", files={"file": ("f.xlsx", handle.read(), "x")}).json()
+    month = body["workload"][0]
+    member = next(m for m in month["members"] if m["name"] == "設計")
+    assert [len(rows) for rows in member["task_rows"]] == member["counts"]
+    first = month["days"].index(next(d for d in month["days"] if d["date"] == "2026-04-01"))
+    assert member["task_rows"][first] == [5]          # 要件定義の行

@@ -436,3 +436,9 @@ table.wbs.load td.free-days {
   .pane-tabs { padding-top: 4px; }
   .pane-tab { min-height: 34px; }
 }
+
+/* 要員稼働チェック: 数字を押すとタスクの一覧が下に出る */
+table.wbs.load td.pickable { cursor: pointer; font-weight: 700; }
+table.wbs.load td.pickable:hover { box-shadow: inset 0 0 0 2px var(--accent); }
+table.wbs.load td.picked { box-shadow: inset 0 0 0 2px var(--ink); }
+.load-detail { padding: 0 14px 14px; overflow-x: auto; }

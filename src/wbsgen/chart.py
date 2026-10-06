@@ -112,6 +112,7 @@ def _workload(imported: ImportedWBS, calendar, language: str) -> List[Dict[str, 
                 {
                     "name": load.name,
                     "counts": load.counts,
+                    "task_rows": load.task_rows,
                     "busy": load.busy_days,
                     "free": len(load.free_days),
                     "free_days": ", ".join(

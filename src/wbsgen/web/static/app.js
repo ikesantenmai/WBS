@@ -149,6 +149,8 @@ const UI = {
     load_free_list: '空き日の内訳',
     load_legend: '凡例：赤=タスク無し（要対応）／緑=1〜2件／橙=3件以上（過負荷の可能性）／灰=非稼働日',
     load_none: 'このファイルには担当が書かれていないので、稼働チェックは作れません。',
+    load_click: 'クリックすると、そのタスクを下に表示します',
+    load_detail: '{name} さんの {date} のタスク（{n} 件）',
     load_info: '{start} 〜 {end} / 稼働 {workdays} 日 / 担当 {members} 名',
     columns_shown: '列',
     columns_min: '項目のみ',
@@ -299,6 +301,8 @@ const UI = {
     load_free_list: 'Which days are free',
     load_legend: 'Red = no task (needs attention) / Green = 1-2 / Orange = 3 or more (possibly overloaded) / Grey = non-working day',
     load_none: 'Nobody is named in this file, so there is no workload check.',
+    load_click: 'Click to list these tasks below',
+    load_detail: 'Tasks for {name} on {date} ({n})',
     load_info: '{start} - {end} / {workdays} working days / {members} people',
     columns_shown: 'Columns',
     columns_min: 'Name only',
@@ -399,6 +403,7 @@ let pane = 'form';         // 狭い画面でどちらを見せているか ('fo
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
 let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
 let view = 'chart';        // 'chart' = ガントチャート / 'load' = 要員稼働チェック
+let loadPick = null;       // 要員稼働チェックで押した数字 ({ member, day })。そのタスクを下に出す
 let loadMonth = 0;         // 要員稼働チェックで見ている月 (何番目か)
 let networkType = 'precedence';  // ネットワーク図の形式 ('precedence' / 'arrow')
 let busyCount = 0;         // 進行中の読み込み・書き出しの数
@@ -634,12 +639,17 @@ const DAILY_COLUMNS = [
   { key: 'subgroup', width: 78, cls: 'subgroup' },
   { key: 'no', width: 36 },
   { key: 'name', width: 236, cls: 'name' },
-  { key: 'member', width: 96, cls: 'member' },
   { key: 'start', width: 62, group: 'plan' },
+  { key: 'days', width: 46, group: 'plan' },
   { key: 'end', width: 62, group: 'plan' },
   { key: 'actual_start', width: 62, group: 'actual' },
+  { key: 'actual_days', width: 46, group: 'actual' },
   { key: 'actual_end', width: 62, group: 'actual' },
+  { key: 'delay', width: 54 },
   { key: 'progress', width: 48 },
+  { key: 'effort', width: 44 },
+  { key: 'predecessor', width: 48 },
+  { key: 'member', width: 96, cls: 'member' },
   { key: 'status', width: 84, cls: 'status' },
 ];
 
@@ -762,6 +772,8 @@ function dailyCell(row, column) {
   }
   if (key === 'progress') {
     td.textContent = row.progress == null ? '' : `${Math.round(row.progress * 100)}%`;
+  } else if (['days', 'actual_days', 'delay'].includes(key)) {
+    td.textContent = row[key] == null ? '' : `${row[key]} ${t('unit_days')}`;
   } else if (/start|end$/.test(key)) {
     td.textContent = shortDate(row[key]);
   } else {
@@ -836,6 +848,7 @@ function renderLoad(model) {
   parts.push(el('div', { class: 'sheet-title', text: month.title }));
   parts.push(loadTable(month));
   parts.push(el('p', { class: 'note load-legend', text: t('load_legend') }));
+  parts.push(...loadDetail(month, model.rows || []));
   $('#sheet').replaceChildren(...parts);
 
   $('#preview-info').textContent = t('load_info', {
@@ -870,10 +883,21 @@ function loadTable(month) {
     const tr = el('tr', {}, el('td', { class: 'load-name', text: member.name }));
     member.counts.forEach((count, i) => {
       const day = month.days[i];
-      tr.append(el('td', {
+      const picked = loadPick && loadPick.member === member.name && loadPick.day === day.date;
+      const td = el('td', {
+        class: `${count ? 'pickable' : ''}${picked ? ' picked' : ''}`,
         text: count ? String(count) : '',
         style: `background:${loadColor(count, day.working)}`,
-      }));
+      });
+      if (count) {
+        td.title = t('load_click');
+        td.addEventListener('click', () => {
+          // 同じ数字をもう一度押したら閉じる
+          loadPick = picked ? null : { member: member.name, day: day.date };
+          redraw();
+        });
+      }
+      tr.append(td);
     });
     tr.append(el('td', { class: 'total', text: String(month.workdays) }));
     tr.append(el('td', { class: 'total', text: String(member.busy) }));
@@ -886,6 +910,25 @@ function loadTable(month) {
     body.append(tr);
   }
   return el('table', { class: 'wbs load' }, head, body);
+}
+
+/** 押した数字のタスクを一覧で出す (人と日が分かる見出しつき)。 */
+function loadDetail(month, rows) {
+  if (!loadPick) return [];
+  const member = month.members.find((m) => m.name === loadPick.member);
+  const index = month.days.findIndex((d) => d.date === loadPick.day);
+  if (!member || index < 0 || !(member.task_rows || [])[index]) return [];
+  const byRow = new Map(rows.map((row) => [row.row, row]));
+  const tasks = member.task_rows[index].map((n) => byRow.get(n)).filter(Boolean);
+  if (!tasks.length) return [];
+  const day = month.days[index];
+  return [
+    el('div', { class: 'sheet-title', text: t('load_detail', {
+      name: member.name, date: day.label, n: tasks.length,
+    }) }),
+    el('div', { class: 'table-wrap daily-table load-detail' },
+      dailyTable(tasks)),
+  ];
 }
 
 function loadColor(count, working) {
@@ -1506,6 +1549,7 @@ async function importFile(file) {
     return;
   }
   cellEdits = {};
+  loadPick = null;
   return importBytes(file.name, bytes, DEFAULT_CHART_UNIT, true);
 }
 
@@ -1788,6 +1832,7 @@ function bind() {
   });
   $('#load-month').addEventListener('change', (event) => {
     loadMonth = Number(event.target.value) || 0;
+    loadPick = null;
     redraw();
   });
   $('#network-type').addEventListener('change', (event) => {

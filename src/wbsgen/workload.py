@@ -38,6 +38,9 @@ class MemberLoad:
     name: str
     #: 日ごとのタスク数 (:attr:`WorkloadMonth.days` と同じ並び)
     counts: List[int] = field(default_factory=list)
+    #: 日ごとの、そのタスクの行番号 (:attr:`counts` と同じ並び)。
+    #: 数字を押したときに、どのタスクかを示すために使う。
+    task_rows: List[List[int]] = field(default_factory=list)
     #: 稼働日のうち、タスクがある日の数 (休みの日は数えない)
     busy_days: int = 0
     #: 稼働日なのにタスクが無い日
@@ -109,7 +112,7 @@ def build(rows, calendar, base_date: Optional[_dt.date] = None) -> List[Workload
     """
     spans = [(row.start, row.end) for row in rows
              if row.start and row.end and row.end >= row.start]
-    tasks = [(row.start, row.end, str(row.member))
+    tasks = [(row.start, row.end, str(row.member), row.row)
              for row in rows
              if row.start and row.end and row.end >= row.start and row.member]
     names = member_names(rows)
@@ -161,11 +164,13 @@ def _load(name: str, entry: WorkloadMonth, tasks) -> MemberLoad:
     担当欄は「佐々木（高瀬）」のように他の名前を含むことがあるので、
     書かれた文字列に名前が**含まれるか**で数える (元の表と同じ数え方)。
     """
-    mine = [(start, end) for start, end, member in tasks if name in member]
+    mine = [(start, end, row) for start, end, member, row in tasks if name in member]
     load = MemberLoad(name=name)
     for day, working in zip(entry.days, entry.workdays):
-        count = sum(1 for start, end in mine if start <= day <= end)
+        found = [row for start, end, row in mine if start <= day <= end]
+        count = len(found)
         load.counts.append(count)
+        load.task_rows.append(found)
         if not working:
             continue
         if count:
