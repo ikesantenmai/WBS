@@ -10,6 +10,7 @@ openpyxl は .xlsx / .xlsm しか扱えないので、.xls は LibreOffice を
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -36,9 +37,43 @@ class ConvertError(Exception):
         self.reason = reason
 
 
+#: PATH に無くても探す場所 (Docker などで PATH が絞られていても見つけるため)
+CANDIDATES = (
+    "/usr/bin/soffice",
+    "/usr/local/bin/soffice",
+    "/usr/lib/libreoffice/program/soffice",
+    "/usr/lib64/libreoffice/program/soffice",
+    "/opt/libreoffice/program/soffice",
+    "/snap/bin/libreoffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+)
+
+
 def office_command() -> Optional[str]:
-    """LibreOffice の実行ファイル。見つからなければ ``None``。"""
-    return shutil.which("soffice") or shutil.which("libreoffice")
+    """LibreOffice の実行ファイル。見つからなければ ``None``。
+
+    環境変数 ``WBSGEN_SOFFICE`` があればそれを使う。次に PATH、最後に
+    よくある場所を探す。
+    """
+    configured = os.environ.get("WBSGEN_SOFFICE")
+    if configured and os.access(configured, os.X_OK):
+        return configured
+    found = shutil.which("soffice") or shutil.which("libreoffice")
+    if found:
+        return found
+    for path in CANDIDATES:
+        if os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def diagnose() -> dict:
+    """見つからないときの手がかり (デプロイ先の確認用)。"""
+    return {
+        "command": office_command(),
+        "path": os.environ.get("PATH", ""),
+        "checked": {path: os.path.exists(path) for path in CANDIDATES},
+    }
 
 
 def available() -> bool:

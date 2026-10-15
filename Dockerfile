@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir ".[web]"
 
 # LibreOffice は設定を HOME に書くので、書き込める場所にする
 ENV HOME=/tmp
+# LibreOffice の場所 (PATH に頼らず、アプリが直接見つけられるようにする)
+ENV WBSGEN_SOFFICE=/usr/bin/soffice
 
 # PORT があればそれで、0.0.0.0 で待ち受ける (Render が PORT を渡す)
 CMD ["wbsgen", "serve"]
