@@ -1,0 +1,7 @@
+# Render の Blueprint。Docker でビルドし、LibreOffice (.xls の変換用) を含める。
+services:
+  - type: web
+    name: wbsgen
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/meta

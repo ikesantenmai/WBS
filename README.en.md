@@ -164,6 +164,12 @@ wbsgen new --start 2026-04-01 --workdays mon,tue,wed,thu,fri,sat \
 `serve` uses the `PORT` environment variable when it is set and listens on
 `0.0.0.0`, so on Render and similar platforms `wbsgen serve` alone is enough.
 
+Reading and writing legacy `.xls` files needs **LibreOffice** on the server. Render's
+standard Python runtime cannot install it, so deploy with **Docker**: the repository's
+`Dockerfile` installs LibreOffice and Japanese fonts, and `render.yaml` is a Render
+Blueprint for it (runtime `docker`, health check `/api/meta`). Without LibreOffice
+everything else works, and an `.xls` upload is rejected with an explanatory error.
+
 ---
 
 ## The web application

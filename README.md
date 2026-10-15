@@ -562,12 +562,25 @@ curl -X POST http://127.0.0.1:8000/api/build \
 
 ## Render にデプロイする
 
-Web Service を作り、次の 2 つを設定します。
+`.xls` を読み書きするには LibreOffice が必要です。Render の標準の Python 環境には
+入れられないので、**Docker でデプロイ**します (リポジトリの `Dockerfile` が
+LibreOffice と日本語フォントを入れます)。
+
+**Blueprint を使う場合**: リポジトリの `render.yaml` を Render に読ませるだけです。
+
+**手動で作る場合**: Web Service を作り、次のように設定します。
 
 | 項目 | 値 |
 |------|-----|
-| Build Command | `pip install -r requirements.txt` |
-| Start Command | `wbsgen serve` |
+| Language / Runtime | `Docker` |
+| Dockerfile Path | `./Dockerfile` |
+| Health Check Path | `/api/meta` |
+
+Build Command / Start Command は要りません (Dockerfile が決めます)。
+LibreOffice が入るぶん、イメージは大きく、初回のビルドに数分かかります。
+`.xls` を使わないなら、従来どおり Python 環境 (Build Command
+`pip install -r requirements.txt`、Start Command `wbsgen serve`) でも動きます
+(`.xls` を読むとエラーで知らせます)。
 
 オプションは要りません。`serve` は環境変数 `PORT` があればそれを使い、
 外部から届くように `0.0.0.0` で待ち受けます (Render / Heroku / Cloud Run など、
