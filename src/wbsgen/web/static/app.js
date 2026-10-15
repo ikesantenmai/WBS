@@ -1488,6 +1488,8 @@ function bars(row, index, colW) {
       fill: shade(row.color, 1.35), 'fill-opacity': done ? 0.95 : 0.65,
       stroke: shade(row.color, 0.5), 'stroke-width': 0.75,
     });
+    // 終了日が空の進行中の行は、基準日までの仮のバーなので点線にする
+    if (row.actual_running) bar.setAttribute('stroke-dasharray', '3 2');
     bar.append(tooltip(row));
     out.push(bar);
   }

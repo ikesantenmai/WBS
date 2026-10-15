@@ -100,8 +100,9 @@ def test_bars_are_drawn_for_every_row(exported):
     names = _shapes(exported)
     for no in ("101", "102", "201", "202", "301"):
         assert f"plan-{no}" in names
-    # 実績のバーを描くのは、終了日まで入っている 101 / 102 の 2 行
-    assert sum(1 for n in names if n.startswith("actual-")) == 2
+    # 実績のバーは、終了日まで入っている 101 / 102 と、進行中 (終了日が空) の 201 / 202
+    assert sum(1 for n in names if n.startswith("actual-")) == 4
+    assert "actual-301" not in names                 # 未着手の行には描かない
     assert "now-line" in names
 
 
@@ -194,3 +195,24 @@ def test_the_exported_file_can_be_read_back(filled_book, exported):
     assert summary(after) == summary(before)
     assert after["totals"] == before["totals"]
     assert after["timeline"]["start"] == before["timeline"]["start"]
+
+
+def test_export_draws_a_dashed_bar_for_a_running_task(make_filled, tmp_path):
+    """進行中 (実績終了日が空) の行には、基準日までの点線の実績バーを描く。"""
+    import datetime as dt
+    import zipfile
+
+    from wbsgen.importer import read
+    from wbsgen.workbook import export
+
+    base = dt.date(2026, 6, 10)
+    out = export(read(make_filled(), base_date=base), tmp_path / "out.xlsx", base)
+    with zipfile.ZipFile(out) as zf:
+        drawing = zf.read("xl/drawings/drawing1.xml").decode()
+    assert 'name="actual-201' in drawing and 'name="actual-202' in drawing   # 進行中の 2 行
+    dashed = [part for part in drawing.split("<xdr:twoCellAnchor")
+              if 'name="actual-201' in part]
+    assert 'prstDash val="dash"' in dashed[0]
+    finished = [part for part in drawing.split("<xdr:twoCellAnchor")
+                if 'name="actual-101' in part]
+    assert 'prstDash' not in finished[0]

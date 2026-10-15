@@ -72,18 +72,35 @@ def test_a_row_without_an_actual_start_has_no_actual_bar(model):
     assert _by_no(model, "301")["plan"] is not None
 
 
-def test_an_unfinished_actual_row_draws_no_actual_bar(model):
-    """実績終了日が空の行は、実績のバーを描かない。
+def test_an_unfinished_actual_row_draws_a_bar_up_to_the_base_date(model):
+    """実績終了日が空でも、着手済みの行は基準日まで仮のバーを描く。
 
     終わっていない作業に残った実績日数は元データの書き間違いなので、
-    そこから終了日を作らない (実際より進んで見えてしまうため)。
+    日数からは終了日を作らない。バーの右端は基準日で、終了日は空のまま。
     """
     row = _by_no(model, "201")
-    assert row["actual_end"] is None
+    assert row["actual_end"] is None             # 終了日は作らない
     assert row["actual_days"] is None            # 書かれていた日数は捨てる
-    assert row["actual"] is None                 # バーは描かない
+    assert row["actual_running"] is True         # 仮のバー (画面では点線)
+    # 5/13 〜 基準日 6/10 (週表示: 5/13 は 6 週目の頭、6/10 は 10 週目の頭の日の終わり)
+    assert row["actual"]["x1"] == pytest.approx(6.0)
+    assert row["actual"]["x2"] == pytest.approx(10 + 1 / 7)
     assert row["actual_start"] == "2026-05-13"   # 着手済みであることは残る
     assert row["progress"] == 0.6                # 完了扱いにはしない
+
+
+def test_a_finished_row_is_not_marked_as_running(model):
+    row = _by_no(model, "101")
+    assert row["actual_running"] is False
+    assert row["actual"] == {"x1": 0.0, "x2": pytest.approx(2.0)}
+
+
+def test_a_task_starting_after_the_base_date_has_no_actual_bar(filled_book):
+    """基準日より先に着手する (実績開始日が未来の) 行は、バーを描かない。"""
+    model = build_chart(read(filled_book), base_date=dt.date(2026, 5, 1))
+    row = _by_no(model, "201")                   # 実績開始 5/13
+    assert row["actual"] is None
+    assert row["actual_running"] is False
 
 
 def test_a_missing_end_date_is_derived_from_the_workdays(model):

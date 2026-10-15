@@ -31,6 +31,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from . import style
 from .blank import BlankWBS
 from .daily import Digest, build as build_daily
+from .chart import running_end
 from .drawing import Drawing, Geometry, Shape
 from .i18n import Labels, labels as get_labels, status_kind
 from . import netdraw
@@ -579,7 +580,8 @@ class _Writer:
             row0 = self.first_row + index - 1
             color = self._color(row.member)
             plan = self._span(row.start, row.end)
-            actual = self._span(row.actual_start, row.actual_end)
+            actual_end, running = running_end(row, self.base_date)
+            actual = self._span(row.actual_start, actual_end)
 
             if plan:
                 top, bottom = ((PLAN_TOP_WITH_ACTUAL, PLAN_BOTTOM_WITH_ACTUAL) if actual
@@ -599,6 +601,7 @@ class _Writer:
                      preset="rect", fill=style.shade(color, 1.35),
                      line_color=style.shade(color, 0.5),
                      alpha=100000 if done else 65000,
+                     dash="dash" if running else None,
                      name=f"actual-{row.no or row.name}")
 
         self._now_line(drawing, geometry, first_col)

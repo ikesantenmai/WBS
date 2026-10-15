@@ -38,7 +38,7 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
     resolve(imported.rows, calendar, today, spec.language)
     colors = _member_colors(imported)
 
-    rows = [_row(row, timeline, colors) for row in imported.rows]
+    rows = [_row(row, timeline, colors, today) for row in imported.rows]
     return {
         "title": imported.title,
         "language": spec.language,
@@ -175,10 +175,11 @@ def _timeline(timeline: Timeline) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-def _row(row: Row, timeline: Timeline, colors) -> Dict[str, Any]:
+def _row(row: Row, timeline: Timeline, colors, today: _dt.date = None) -> Dict[str, Any]:
     """日数・終了日・進捗は :func:`wbsgen.importer.resolve` が解決済み。"""
     color = colors.get(row.member, "#" + style.MEMBER_PALETTE[0])
     background, foreground = _status_color(row.status)
+    actual_end, running = running_end(row, today)
     return {
         "row": row.row,
         "group": row.group,
@@ -208,8 +209,24 @@ def _row(row: Row, timeline: Timeline, colors) -> Dict[str, Any]:
         "status_bg": background,
         "status_fg": foreground,
         "plan": _span(timeline, row.start, row.end),
-        "actual": _span(timeline, row.actual_start, row.actual_end),
+        "actual": _span(timeline, row.actual_start, actual_end),
+        # 終了日が空の進行中の行は、基準日までの仮のバー (画面では点線にする)
+        "actual_running": running,
     }
+
+
+def running_end(row: Row, today: Optional[_dt.date]):
+    """実績バーの右端と、それが基準日までの仮のものか。
+
+    実績の終了日が空でも、着手済み (開始日あり) なら、まだ終わっていない
+    作業として**基準日まで**バーを伸ばす。終了日が書かれていればそれを使う。
+    開始日が基準日より先 (これから着手) なら、バーは描かない。
+    """
+    if row.actual_end is not None or row.actual_start is None or today is None:
+        return row.actual_end, False
+    if row.actual_start > today:
+        return None, False
+    return today, True
 
 
 def _span(timeline: Timeline, start, end) -> Optional[Dict[str, float]]:
