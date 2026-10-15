@@ -1265,3 +1265,47 @@ def test_a_missing_column_is_reported(filled_book):
 
 def test_a_complete_sheet_has_no_warnings(filled_book):
     assert read(filled_book, base_date=BASE).warnings == []
+
+
+# ---------------------------------------------------------------- 日付の書き方
+@pytest.mark.parametrize("text", [
+    "2026/4/1", "2026-04-01", "2026年4月1日", "2026.4.1", "２０２６／４／１",
+    "2026/4/1(水)", "2026年4月1日（水）", "4/1(水)", "4/1 水", "4月1日(水曜)",
+    "令和8年4月1日", "R8.4.1", "26/4/1", "20260401", "2026-04-01T00:00:00",
+    "Apr 1, 2026", "46113",
+])
+def test_many_ways_of_writing_a_date_are_read(text):
+    from wbsgen.importer import _date_or_none
+
+    assert _date_or_none(text, 2026) == dt.date(2026, 4, 1)
+
+
+def test_numbers_are_read_as_serials_or_compact_dates():
+    from wbsgen.importer import _date_or_none
+
+    assert _date_or_none(46113) == dt.date(2026, 4, 1)           # Excel のシリアル値
+    assert _date_or_none(20260401) == dt.date(2026, 4, 1)        # 8 桁
+
+
+def test_a_date_without_a_year_takes_the_year_of_the_file():
+    from wbsgen.importer import _date_or_none
+
+    assert _date_or_none("4/1", 2031) == dt.date(2031, 4, 1)
+    assert _date_or_none("2/30", 2026) is None                   # 存在しない日付
+
+
+def test_dates_without_a_year_follow_the_other_dates_in_the_file(make_filled, tmp_path):
+    """年の無い「4/1」を、今年ではなく表の中の日付の年として読む。"""
+    import openpyxl
+
+    from wbsgen.importer import read
+
+    path = make_filled()
+    book = openpyxl.load_workbook(path)
+    sheet = book["スケジュール"]
+    sheet["F5"], sheet["H5"] = "4/1(水)", "4/14"          # 年なし・曜日つき
+    sheet["F6"], sheet["H6"] = "4/15", "令和8年5月7日"
+    book.save(path)
+    rows = read(path).rows
+    assert (rows[0].start, rows[0].end) == (dt.date(2026, 4, 1), dt.date(2026, 4, 14))
+    assert rows[1].end == dt.date(2026, 5, 7)

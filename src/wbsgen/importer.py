@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import io
+import re as _re
 import zipfile
 import unicodedata as _unicodedata
 from copy import copy
@@ -198,7 +199,8 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     config = _read_config(book)
     first_row = header_row + (2 if config.get("unit") == UNIT_DAY else 1)
     rows, warnings = _read_rows(sheet, first_row, columns, lang,
-                                theme_colors(book))
+                                theme_colors(book),
+                                _reference_year(sheet, first_row, columns, config))
     warnings = (_missing_column_warnings(columns, lang)
                 + _formula_warnings(source, sheet.title, columns, rows, lang)
                 + warnings)
@@ -697,8 +699,40 @@ def _merged_values(sheet) -> Dict[tuple, object]:
     return out
 
 
+#: 年の無い日付に補う年を決めるために、見る行の上限
+YEAR_SCAN_ROWS = 2000
+DATE_KEYS = ("start", "end", "actual_start", "actual_end")
+
+
+def _reference_year(sheet, first_row: int, columns: Dict[str, int],
+                    config: Dict[str, Any]) -> Optional[int]:
+    """「4/1」のように年の無い日付に補う年。
+
+    表の中で**年まで書かれている日付**のうち、いちばん多い年を使う。
+    1 つも無ければ設定シートの開始日の年、それも無ければ ``None``
+    (今年として読む)。
+    """
+    counts: Dict[int, int] = {}
+    last = min(sheet.max_row or first_row, first_row + YEAR_SCAN_ROWS)
+    for index in range(first_row, last + 1):
+        for key in DATE_KEYS:
+            if key not in columns:
+                continue
+            value = sheet.cell(row=index, column=columns[key]).value
+            if _is_blank(value):
+                continue
+            # 年が無ければ 1 年に読まれるので、そうでないものだけ数える
+            day = _date_or_none(value, 1)
+            if day is not None and day.year != 1:
+                counts[day.year] = counts.get(day.year, 0) + 1
+    if counts:
+        return max(counts, key=lambda y: (counts[y], y))
+    start = config.get("start")
+    return start.year if start else None
+
+
 def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str,
-               theme: List[str] = ()):
+               theme: List[str] = (), year: Optional[int] = None):
     """記入された行を読む。空行は飛ばす。
 
     読めないセルがあっても行は捨てず、その項目だけ空にして注意書きに残す
@@ -744,10 +778,10 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str,
                     reason=_reason(exc, language)))
                 return None
 
-        row.start = cell("start", _date)
-        row.end = cell("end", _date)
-        row.actual_start = cell("actual_start", _date)
-        row.actual_end = cell("actual_end", _date)
+        row.start = cell("start", lambda value: _date(value, year))
+        row.end = cell("end", lambda value: _date(value, year))
+        row.actual_start = cell("actual_start", lambda value: _date(value, year))
+        row.actual_end = cell("actual_end", lambda value: _date(value, year))
         row.days = cell("days", _int)
         row.actual_days = cell("actual_days", _int)
         row.delay = cell("delay", _int)
@@ -1022,17 +1056,33 @@ def _name_text(value) -> str:
     return text if text.strip() else ""
 
 
-#: 受け付ける日付の書き方
+#: 受け付ける日付の書き方 (年が無いものは、読み取り中のファイルの年を補う)
 DATE_FORMATS = (
     "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
     "%Y年%m月%d日", "%m月%d日", "%m-%d",
+    "%b %d, %Y", "%B %d, %Y", "%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%b-%y",
 )
 
+#: 元号 (略号も) と、西暦に直すための引く年
+ERAS = {"令和": 2018, "R": 2018, "平成": 1988, "H": 1988, "昭和": 1925, "S": 1925}
 
-def _date(value) -> Optional[_dt.date]:
+#: 日付の後ろに付く曜日: 「(水)」「(水曜)」「(Wed)」と、空白をはさんだ「 水」
+WEEKDAY_TAIL = _re.compile(
+    r"\s*\(\s*(?:[月火水木金土日](?:曜日?)?|(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?)\s*\)"
+    r"|\s+(?:[月火水木金土日](?:曜日?)?|(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?)$",
+    _re.IGNORECASE)
+ERA_DATE = _re.compile(
+    r"^(令和|平成|昭和|[RHS])\s*(元|\d{1,2})\s*[年.\-/]\s*(\d{1,2})\s*[月.\-/]\s*(\d{1,2})\s*日?$",
+    _re.IGNORECASE)
+ISO_DATE = _re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$")
+SHORT_YEAR_DATE = _re.compile(r"^(\d{2})-(\d{1,2})-(\d{1,2})$")
+COMPACT_DATE = _re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+
+
+def _date(value, year: Optional[int] = None) -> Optional[_dt.date]:
     if _is_blank(value):
         return None
-    day = _date_or_none(value)
+    day = _date_or_none(value, year)
     if day is None:
         raise ValueError(_CellError("cell_bad_date", value))
     return day
@@ -1045,7 +1095,19 @@ SERIAL_RANGE = ((_dt.date(1901, 1, 1) - EXCEL_EPOCH).days,
                 (_dt.date(2199, 12, 31) - EXCEL_EPOCH).days)
 
 
-def _date_or_none(value) -> Optional[_dt.date]:
+def _ymd(year: int, month: int, day: int) -> Optional[_dt.date]:
+    """存在する日付なら返す (2/30 などは ``None``)。"""
+    try:
+        return _dt.date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _date_or_none(value, year: Optional[int] = None) -> Optional[_dt.date]:
+    """日付として読む。読めなければ ``None``。
+
+    ``year`` は、「4/1」のように年の無い書き方に補う年 (無ければ今年)。
+    """
     if isinstance(value, _dt.datetime):
         return value.date()
     if isinstance(value, _dt.date):
@@ -1054,20 +1116,53 @@ def _date_or_none(value) -> Optional[_dt.date]:
         return None
     # 書式が「標準」のままだと、日付は数値 (シリアル値) として入っている
     if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = int(value)
         low, high = SERIAL_RANGE
         if low <= value <= high:
-            return EXCEL_EPOCH + _dt.timedelta(days=int(value))
+            return EXCEL_EPOCH + _dt.timedelta(days=number)
+        # 20260401 のような 8 桁の数字
+        return _compact(str(number))
+    text = WEEKDAY_TAIL.sub("", _clean(value)).strip()
+    if text.isdigit():
+        # 文字として入ったシリアル値 (46113) と 8 桁 (20260401)
+        if len(text) == 8:
+            return _compact(text)
+        if SERIAL_RANGE[0] <= int(text) <= SERIAL_RANGE[1]:
+            return EXCEL_EPOCH + _dt.timedelta(days=int(text))
         return None
-    text = _clean(value).replace("/", "-").replace(".", "-")
+
+    era = ERA_DATE.match(text)
+    if era:
+        name, count, month, day = era.groups()
+        base = ERAS.get(name) or ERAS.get(name.upper())
+        return _ymd(base + (1 if count == "元" else int(count)), int(month), int(day))
+
+    text = text.replace("/", "-").replace(".", "-")
+    iso = ISO_DATE.match(text)
+    if iso:
+        return _ymd(*(int(part) for part in iso.groups()))
+    short = SHORT_YEAR_DATE.match(text)
+    if short:
+        # 26/4/1 のように 2 桁の年は 2000 年代とみなす
+        yy, month, day = (int(part) for part in short.groups())
+        return _ymd(2000 + yy, month, day)
     for fmt in DATE_FORMATS:
         try:
-            parsed = _dt.datetime.strptime(text, fmt.replace("/", "-"))
+            parsed = _dt.datetime.strptime(text, fmt)
         except ValueError:
             continue
-        if "%Y" not in fmt:
-            parsed = parsed.replace(year=_dt.date.today().year)
+        if "%Y" not in fmt and "%y" not in fmt:
+            return _ymd(year or _dt.date.today().year, parsed.month, parsed.day)
         return parsed.date()
     return None
+
+
+def _compact(text: str) -> Optional[_dt.date]:
+    """``20260401`` を日付にする。"""
+    found = COMPACT_DATE.match(text)
+    if not found or not 1900 <= int(found.group(1)) <= 2199:
+        return None
+    return _ymd(*(int(part) for part in found.groups()))
 
 
 #: 日数の後ろに付きがちな単位
