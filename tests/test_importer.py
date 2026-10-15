@@ -1309,3 +1309,34 @@ def test_dates_without_a_year_follow_the_other_dates_in_the_file(make_filled, tm
     rows = read(path).rows
     assert (rows[0].start, rows[0].end) == (dt.date(2026, 4, 1), dt.date(2026, 4, 14))
     assert rows[1].end == dt.date(2026, 5, 7)
+
+
+def test_serial_numbers_follow_the_date_system_of_the_file():
+    """古い Mac 版 Excel (1904 年方式) の数値の日付は、1900 年方式と 4 年 1 日ずれる。"""
+    from wbsgen.importer import _date_or_none
+
+    mac = dt.date(1904, 1, 1)
+    assert _date_or_none(46113) == dt.date(2026, 4, 1)                 # 1900 年方式
+    assert _date_or_none(46113 - 1462, None, mac) == dt.date(2026, 4, 1)   # 1904 年方式
+
+
+def test_a_rounding_error_just_before_midnight_is_the_next_day():
+    from wbsgen.importer import _date_or_none
+
+    assert _date_or_none(dt.datetime(2026, 3, 31, 23, 59, 59, 999000)) == dt.date(2026, 4, 1)
+    assert _date_or_none(dt.datetime(2026, 4, 1, 9, 30)) == dt.date(2026, 4, 1)
+
+
+def test_a_1904_workbook_with_plain_numbers_is_read_correctly(make_filled):
+    from openpyxl.utils.datetime import CALENDAR_MAC_1904
+
+    path = make_filled()
+    book = openpyxl.load_workbook(path)
+    book.epoch = CALENDAR_MAC_1904
+    sheet = book["スケジュール"]
+    for cell in ("F5", "H5"):
+        sheet[cell].number_format = "General"
+        sheet[cell].value = (sheet[cell].value.date() - dt.date(1904, 1, 1)).days
+    book.save(path)
+    row = read(path).rows[0]
+    assert (row.start, row.end) == (dt.date(2026, 4, 1), dt.date(2026, 4, 14))

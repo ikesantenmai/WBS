@@ -200,7 +200,8 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     first_row = header_row + (2 if config.get("unit") == UNIT_DAY else 1)
     rows, warnings = _read_rows(sheet, first_row, columns, lang,
                                 theme_colors(book),
-                                _reference_year(sheet, first_row, columns, config))
+                                _reference_year(sheet, first_row, columns, config, _epoch(book)),
+                                _epoch(book))
     warnings = (_missing_column_warnings(columns, lang)
                 + _formula_warnings(source, sheet.title, columns, rows, lang)
                 + warnings)
@@ -705,7 +706,7 @@ DATE_KEYS = ("start", "end", "actual_start", "actual_end")
 
 
 def _reference_year(sheet, first_row: int, columns: Dict[str, int],
-                    config: Dict[str, Any]) -> Optional[int]:
+                    config: Dict[str, Any], epoch: _dt.date = None) -> Optional[int]:
     """「4/1」のように年の無い日付に補う年。
 
     表の中で**年まで書かれている日付**のうち、いちばん多い年を使う。
@@ -722,7 +723,7 @@ def _reference_year(sheet, first_row: int, columns: Dict[str, int],
             if _is_blank(value):
                 continue
             # 年が無ければ 1 年に読まれるので、そうでないものだけ数える
-            day = _date_or_none(value, 1)
+            day = _date_or_none(value, 1, epoch)
             if day is not None and day.year != 1:
                 counts[day.year] = counts.get(day.year, 0) + 1
     if counts:
@@ -731,8 +732,15 @@ def _reference_year(sheet, first_row: int, columns: Dict[str, int],
     return start.year if start else None
 
 
+def _epoch(book) -> _dt.date:
+    """ファイルの日付の起点 (1900 年方式 / 1904 年方式)。"""
+    epoch = getattr(book, "epoch", None)
+    return epoch.date() if isinstance(epoch, _dt.datetime) else EXCEL_EPOCH
+
+
 def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str,
-               theme: List[str] = (), year: Optional[int] = None):
+               theme: List[str] = (), year: Optional[int] = None,
+               epoch: _dt.date = None):
     """記入された行を読む。空行は飛ばす。
 
     読めないセルがあっても行は捨てず、その項目だけ空にして注意書きに残す
@@ -778,10 +786,10 @@ def _read_rows(sheet, first_row: int, columns: Dict[str, int], language: str,
                     reason=_reason(exc, language)))
                 return None
 
-        row.start = cell("start", lambda value: _date(value, year))
-        row.end = cell("end", lambda value: _date(value, year))
-        row.actual_start = cell("actual_start", lambda value: _date(value, year))
-        row.actual_end = cell("actual_end", lambda value: _date(value, year))
+        row.start = cell("start", lambda value: _date(value, year, epoch))
+        row.end = cell("end", lambda value: _date(value, year, epoch))
+        row.actual_start = cell("actual_start", lambda value: _date(value, year, epoch))
+        row.actual_end = cell("actual_end", lambda value: _date(value, year, epoch))
         row.days = cell("days", _int)
         row.actual_days = cell("actual_days", _int)
         row.delay = cell("delay", _int)
@@ -1079,10 +1087,11 @@ SHORT_YEAR_DATE = _re.compile(r"^(\d{2})-(\d{1,2})-(\d{1,2})$")
 COMPACT_DATE = _re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 
 
-def _date(value, year: Optional[int] = None) -> Optional[_dt.date]:
+def _date(value, year: Optional[int] = None,
+          epoch: _dt.date = None) -> Optional[_dt.date]:
     if _is_blank(value):
         return None
-    day = _date_or_none(value, year)
+    day = _date_or_none(value, year, epoch)
     if day is None:
         raise ValueError(_CellError("cell_bad_date", value))
     return day
@@ -1103,12 +1112,29 @@ def _ymd(year: int, month: int, day: int) -> Optional[_dt.date]:
         return None
 
 
-def _date_or_none(value, year: Optional[int] = None) -> Optional[_dt.date]:
+def _serial(number: float, epoch: _dt.date) -> Optional[_dt.date]:
+    """Excel のシリアル値を日付にする。範囲外なら ``None``。
+
+    ``epoch`` はファイルの日付の起点 (Windows 版は 1899-12-30、古い Mac 版は
+    1904-01-01)。起点が違うと同じ数字でも 4 年ずれる。
+    """
+    if not 0 < number < 200000:             # 2199 年より先は日付ではない
+        return None
+    day = (epoch or EXCEL_EPOCH) + _dt.timedelta(days=int(number))
+    return day if _dt.date(1901, 1, 1) <= day <= _dt.date(2199, 12, 31) else None
+
+
+def _date_or_none(value, year: Optional[int] = None,
+                  epoch: _dt.date = None) -> Optional[_dt.date]:
     """日付として読む。読めなければ ``None``。
 
     ``year`` は、「4/1」のように年の無い書き方に補う年 (無ければ今年)。
+    ``epoch`` は数値の日付の起点 (無ければ 1899-12-30)。
     """
     if isinstance(value, _dt.datetime):
+        # 変換の丸め誤差で「前日の 23:59:59.999」になったものは、翌日の 0 時とみなす
+        if value.hour == 23 and value.minute == 59 and value.second >= 59:
+            return value.date() + _dt.timedelta(days=1)
         return value.date()
     if isinstance(value, _dt.date):
         return value
@@ -1116,20 +1142,17 @@ def _date_or_none(value, year: Optional[int] = None) -> Optional[_dt.date]:
         return None
     # 書式が「標準」のままだと、日付は数値 (シリアル値) として入っている
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        number = int(value)
-        low, high = SERIAL_RANGE
-        if low <= value <= high:
-            return EXCEL_EPOCH + _dt.timedelta(days=number)
+        found = _serial(round(value) if abs(value - round(value)) < 1e-6 else value, epoch)
+        if found is not None:
+            return found
         # 20260401 のような 8 桁の数字
-        return _compact(str(number))
+        return _compact(str(int(value)))
     text = WEEKDAY_TAIL.sub("", _clean(value)).strip()
     if text.isdigit():
         # 文字として入ったシリアル値 (46113) と 8 桁 (20260401)
         if len(text) == 8:
             return _compact(text)
-        if SERIAL_RANGE[0] <= int(text) <= SERIAL_RANGE[1]:
-            return EXCEL_EPOCH + _dt.timedelta(days=int(text))
-        return None
+        return _serial(int(text), epoch)
 
     era = ERA_DATE.match(text)
     if era:
