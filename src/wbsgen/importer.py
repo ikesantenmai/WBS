@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import io
+import zipfile
 import unicodedata as _unicodedata
 from copy import copy
 from dataclasses import dataclass, field
@@ -170,6 +171,8 @@ class ImportedWBS:
     #: 元のファイルの中身。足してあるシートがあるときだけ控える。書き出しは
     #: これを土台にするので、足したシートに手を入れずに済む。
     source: Optional[bytes] = None
+    #: マクロ有効の形式 (.xlsm、またはマクロ入り) か。書き出しも同じ形式にする。
+    macro: bool = False
 
 
 # ----------------------------------------------------------------------
@@ -200,8 +203,11 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     resolve(rows, spec.calendar(), base_date, lang)
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
+    macro = _is_macro(source, filename)
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
-                       source=_source_bytes(source) if _has_extra(book) else None)
+                       # マクロ入りは、書き出しでマクロごと引き継ぐので常に控える
+                       source=_source_bytes(source) if (macro or _has_extra(book)) else None,
+                       macro=macro)
 
 
 def _edit_converters():
@@ -264,7 +270,8 @@ def apply_edits(imported: ImportedWBS, edits, language: str = DEFAULT_LANGUAGE,
     return imported
 
 
-def assign_numbers(source, language: str = DEFAULT_LANGUAGE, edits=None):
+def assign_numbers(source, language: str = DEFAULT_LANGUAGE, edits=None,
+                   macro: bool = False):
     """項番が空の行に、上から順に連番を書き込んだ本を返す。
 
     ``(xlsx のバイト列, 振った件数)`` を返す。すでに書かれている項番は
@@ -280,7 +287,8 @@ def assign_numbers(source, language: str = DEFAULT_LANGUAGE, edits=None):
     imported = apply_edits(read(io.BytesIO(raw), language=lang), edits, lang)
     try:
         # 書き戻すので、計算結果ではなく数式を読む
-        book = load_workbook(io.BytesIO(raw), data_only=False)
+        # マクロ入りは、書き戻してもマクロが残るように keep_vba で読む
+        book = load_workbook(io.BytesIO(raw), data_only=False, keep_vba=macro)
     except Exception as exc:  # noqa: BLE001
         raise SpecError(message(lang, "not_excel", reason=exc))
     sheet, _header_row, columns = _pick_plan_sheet(book, lang)
@@ -551,6 +559,25 @@ def _has_extra(book) -> bool:
     """このツールが使わないシートが足してあるか。"""
     known = PLAN_SHEETS | CONFIG_SHEETS | MEMBER_SHEETS
     return any(name not in known for name in book.sheetnames)
+
+
+MACRO_SUFFIX = ".xlsm"
+VBA_PART = "xl/vbaProject.bin"
+
+
+def _is_macro(source, filename: str = "") -> bool:
+    """マクロ有効の形式か。拡張子が .xlsm、またはマクロの部品が入っていれば真。"""
+    name = filename or (str(source) if isinstance(source, (str, Path)) else "")
+    if name.lower().endswith(MACRO_SUFFIX):
+        return True
+    raw = _source_bytes(source)
+    if not raw:
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            return VBA_PART in archive.namelist()
+    except zipfile.BadZipFile:
+        return False
 
 
 def _source_bytes(source) -> Optional[bytes]:

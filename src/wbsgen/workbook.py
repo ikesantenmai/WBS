@@ -143,6 +143,7 @@ def export(imported, path, base_date=None) -> Path:
     # 状態と遅れは基準日で決まるので、この日付で数え直してから書く
     resolve(imported.rows, spec.calendar(), day, spec.language)
     writer = _Writer(spec, rows=imported.rows, base_date=day)
+    writer.keep_vba = imported.macro
     writer.workload = build_workload(imported.rows, spec.calendar())
     writer.daily = build_daily(imported.rows, spec.calendar(), day)
     writer.network = _precedence(imported.rows)
@@ -182,6 +183,9 @@ class _Writer:
         self.daily: Optional[Digest] = None
         #: ネットワーク図 (プレジデンス図)。``None`` なら作らない。
         self.network = None
+        #: マクロ有効の本として書き出すか (元のマクロを引き継ぐ)
+        self.keep_vba = False
+        self._code_names = {}
         #: 項番が空で、図に載せなかった行の数
         self.network_skipped = 0
         self.base_date = base_date or _dt.date.today()
@@ -212,6 +216,8 @@ class _Writer:
         plan = None
         for offset, (title, write_sheet) in enumerate(sheets):
             ws = workbook.create_sheet(title, at + offset)
+            if self._code_names.get(title):
+                ws.sheet_properties.codeName = self._code_names[title]
             write_sheet(ws)
             plan = plan or ws
         workbook.save(path)
@@ -231,7 +237,8 @@ class _Writer:
         if source:
             try:
                 # 数式はそのまま残したいので、計算結果ではなく数式を読む
-                return load_workbook(io.BytesIO(source), data_only=False)
+                return load_workbook(io.BytesIO(source), data_only=False,
+                                     keep_vba=self.keep_vba)
             except Exception:  # noqa: BLE001 - 開けなければ新しく作る
                 pass
         workbook = Workbook()
@@ -271,6 +278,9 @@ class _Writer:
         """
         doomed = [n for n in workbook.sheetnames if n in titles]
         at = workbook.sheetnames.index(doomed[0]) if doomed else 0
+        # マクロはシートをコード名 (Sheet1 など) で指すので、作り直すシートに引き継ぐ
+        self._code_names = {name: workbook[name].sheet_properties.codeName
+                            for name in doomed}
         for name in doomed:
             del workbook[name]
         return min(at, len(workbook.sheetnames))

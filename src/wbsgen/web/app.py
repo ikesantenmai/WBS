@@ -159,9 +159,18 @@ def _chart_suffix(spec: BlankWBS) -> str:
     return "_ガント" if spec.language == "ja" else "_gantt"
 
 
-def _filename(spec: BlankWBS, suffix: str = "") -> str:
+XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLSM_TYPE = "application/vnd.ms-excel.sheet.macroEnabled.12"
+
+
+def _extension(macro: bool) -> str:
+    """書き出すファイルの拡張子。マクロ有効の本で読んだら .xlsm のまま返す。"""
+    return "xlsm" if macro else "xlsx"
+
+
+def _filename(spec: BlankWBS, suffix: str = "", macro: bool = False) -> str:
     stem = "".join(c for c in spec.title if c not in '\\/:*?"<>|').strip()
-    return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.xlsx")
+    return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.{_extension(macro)}")
 
 
 # ----------------------------------------------------------------------
@@ -243,17 +252,18 @@ async def export_workbook(
     """
     imported = await _read_upload(file, unit, normalize(lang), edits)
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "wbs.xlsx"
+        path = Path(tmp) / f"wbs.{_extension(imported.macro)}"
         workbook.export(imported, path)
         data = path.read_bytes()
 
     return Response(
         content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=XLSM_TYPE if imported.macro else XLSX_TYPE,
         headers={
             "Content-Disposition":
-                f"attachment; filename=wbs.xlsx;"
-                f" filename*=UTF-8''{_filename(imported.spec, _chart_suffix(imported.spec))}",
+                f"attachment; filename=wbs.{_extension(imported.macro)};"
+                f" filename*=UTF-8''"
+                f"{_filename(imported.spec, _chart_suffix(imported.spec), imported.macro)}",
         },
     )
 
@@ -270,16 +280,17 @@ async def number_workbook(
     await file.seek(0)
     try:
         data, count = assign_numbers(io.BytesIO(await file.read()), language,
-                                     _parse_edits(edits, language))
+                                     _parse_edits(edits, language), imported.macro)
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return Response(
         content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=XLSM_TYPE if imported.macro else XLSX_TYPE,
         headers={
             "Content-Disposition":
-                f"attachment; filename=wbs.xlsx;"
-                f" filename*=UTF-8''{_filename(imported.spec, _number_suffix(imported.spec))}",
+                f"attachment; filename=wbs.{_extension(imported.macro)};"
+                f" filename*=UTF-8''"
+                f"{_filename(imported.spec, _number_suffix(imported.spec), imported.macro)}",
             "X-Numbered-Rows": str(count),
         },
     )

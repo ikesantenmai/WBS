@@ -562,3 +562,65 @@ def test_workload_lists_the_tasks_behind_every_count(client, filled_book):
     assert [len(rows) for rows in member["task_rows"]] == member["counts"]
     first = month["days"].index(next(d for d in month["days"] if d["date"] == "2026-04-01"))
     assert member["task_rows"][first] == [5]          # 要件定義の行
+
+
+# ---------------------------------------------------------------- xlsm
+VBA = b"FAKE-VBA-PROJECT"
+
+
+@pytest.fixture
+def macro_book(filled_book, tmp_path):
+    """マクロ (vbaProject.bin) 入りの .xlsm。"""
+    out = tmp_path / "macro.xlsm"
+    with zipfile.ZipFile(filled_book) as src, zipfile.ZipFile(out, "w") as dst:
+        for name in src.namelist():
+            data = src.read(name)
+            if name == "[Content_Types].xml":
+                data = data.replace(
+                    b"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                    b"application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+                if b'Extension="bin"' not in data:
+                    data = data.replace(
+                        b"</Types>",
+                        b'<Default Extension="bin" ContentType='
+                        b'"application/vnd.ms-office.vbaProject"/></Types>')
+            if name == "xl/_rels/workbook.xml.rels":
+                data = data.replace(
+                    b"</Relationships>",
+                    b'<Relationship Id="rIdVba" Type="http://schemas.microsoft.com/office/'
+                    b'2006/relationships/vbaProject" Target="vbaProject.bin"/></Relationships>')
+            dst.writestr(name, data)
+        dst.writestr("xl/vbaProject.bin", VBA)
+    return out
+
+
+def _upload_xlsm(client, path, url):
+    with open(path, "rb") as handle:
+        return client.post(url, files={"file": ("macro.xlsm", handle.read(), "x")})
+
+
+def test_export_of_an_xlsm_stays_xlsm_with_its_macros(client, macro_book):
+    response = _upload_xlsm(client, macro_book, "/api/export")
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith(
+        "application/vnd.ms-excel.sheet.macroEnabled.12")
+    assert ".xlsm" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == VBA
+        assert b"macroEnabled" in zf.read("[Content_Types].xml")
+        assert "xl/drawings/drawing1.xml" in zf.namelist()      # ガントも付く
+
+
+def test_numbering_keeps_the_macros_of_an_xlsm(client, macro_book):
+    response = _upload_xlsm(client, macro_book, "/api/number")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == VBA
+
+
+def test_export_of_an_xlsx_stays_xlsx(client, filled_book):
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("f.xlsx", handle.read(), "x")})
+    assert ".xlsx" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert "xl/vbaProject.bin" not in zf.namelist()
