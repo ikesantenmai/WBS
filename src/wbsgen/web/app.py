@@ -334,6 +334,15 @@ def _number_suffix(spec: BlankWBS) -> str:
     return "_項番" if spec.language == "ja" else "_numbered"
 
 
+@app.middleware("http")
+async def no_store_api(request, call_next):
+    """API の結果はブラウザに保存させない (古い答えが画面に残らないように)。"""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     """トップページ。

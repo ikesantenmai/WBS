@@ -669,3 +669,9 @@ def test_an_xls_without_libreoffice_is_explained(client, monkeypatch):
     response = client.post("/api/import", files={"file": ("f.xls", b"data", "x")})
     assert response.status_code == 501
     assert "LibreOffice" in response.json()["detail"]
+
+
+def test_api_answers_are_not_cached(client):
+    response = client.get("/api/meta")
+    assert response.headers["cache-control"] == "no-store"
+    assert "xls_supported" in response.json()
