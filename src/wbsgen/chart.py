@@ -16,7 +16,7 @@ from .i18n import labels as get_labels, status_kind
 from .importer import ImportedWBS, Row, resolve
 from .network import build as build_precedence, build_arrow
 from .timeline import Timeline
-from .workload import build as build_workload
+from .workload import build as build_workload, member_names
 
 #: 画面での状態表示の色 (添付ファイルの配色を、画面で読みやすいように調整)
 STATUS_COLORS = {
@@ -48,6 +48,8 @@ def build(imported: ImportedWBS, base_date: Optional[_dt.date] = None) -> Dict[s
         "timeline": _timeline(timeline),
         "rows": rows,
         "members": [{"name": name, "color": color} for name, color in colors.items()],
+        # 担当欄を 1 人ずつに分けた名前 (担当者別の画面で選ぶ)
+        "people": member_names(imported.rows),
         "totals": _totals(rows),
         "workload": _workload(imported, calendar, spec.language),
         "daily": _daily(imported, calendar, today),

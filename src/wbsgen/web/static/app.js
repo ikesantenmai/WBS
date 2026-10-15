@@ -90,6 +90,14 @@ const UI = {
     view: '表示',
     view_chart: 'ガントチャート',
     view_daily: '本日の状況',
+    view_member: '担当者別',
+    member_pick: '担当者を選んでください',
+    member_all: 'すべて選ぶ',
+    member_clear: '選択を解除',
+    member_title: '{names} のWBS',
+    member_info: '担当 {n} 名 / {rows} 行',
+    member_empty: '上の担当者にチェックを付けると、その人のタスクの表とガントチャートが出ます。',
+    member_no_rows: '選んだ担当者のタスクはありません。',
     view_load: '要員稼働チェック',
     view_network: 'ネットワーク図',
     network_type: 'ダイアグラム形式',
@@ -244,6 +252,14 @@ const UI = {
     view: 'View',
     view_chart: 'Gantt chart',
     view_daily: "Today's status",
+    view_member: 'By owner',
+    member_pick: 'Pick owners',
+    member_all: 'Select all',
+    member_clear: 'Clear',
+    member_title: 'WBS for {names}',
+    member_info: '{n} owners / {rows} rows',
+    member_empty: 'Tick owners above to see their tasks as a table and a Gantt chart.',
+    member_no_rows: 'The selected owners have no tasks.',
     view_load: 'Workload check',
     view_network: 'Network diagram',
     network_type: 'Diagram type',
@@ -407,6 +423,7 @@ let pane = 'form';         // 狭い画面でどちらを見せているか ('fo
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
 let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
 let view = 'chart';        // 'chart' = ガントチャート / 'load' = 要員稼働チェック
+let pickedMembers = new Set();  // 担当者別の画面で選んでいる名前
 let loadPick = null;       // 要員稼働チェックで押した数字 ({ member, day })。そのタスクを下に出す
 let loadMonth = 0;         // 要員稼働チェックで見ている月 (何番目か)
 let networkType = 'precedence';  // ネットワーク図の形式 ('precedence' / 'arrow')
@@ -563,10 +580,11 @@ function render(model) {
   if (view === 'load') return renderLoad(model);
   if (view === 'daily') return renderDaily(model);
   if (view === 'network') return renderNetwork(model);
+  if (view === 'member') return renderMemberView(model);
   return renderChart(model);
 }
 
-function renderChart(view) {
+function renderChart(view, extra = []) {
   const { timeline } = view;
   const colW = CHART_WIDTH[timeline.unit] || 42;
   const withWeekday = timeline.unit === 'day';
@@ -586,12 +604,95 @@ function renderChart(view) {
 
   const parts = [el('div', { class: 'sheet-title', text: view.title })];
   if (view.warnings && view.warnings.length) parts.push(warningBox(view.warnings));
-  parts.push(grid);
+  parts.push(...extra);
+  if (view.empty) parts.push(el('p', { class: 'empty-note', text: view.empty }));
+  else parts.push(grid);
   $('#sheet').replaceChildren(...parts);
 
   const limited = view.blankRows > rowCount ? t('info_limited', { n: rowCount }) : '';
   $('#preview-info').textContent = view.info + limited;
   renderTotals(view.totals);
+}
+
+// ---------------------------------------------------------------- 担当者別
+/*
+ * 担当者を複数選んで、その人たちのタスクだけの WBS (表とガントチャート) を見る。
+ * 担当欄は「吉田/菊池」のように複数の名前を含むので、書かれた文字に名前が
+ * 含まれるかで選ぶ (要員稼働チェックと同じ数え方)。
+ */
+function rowsOf(model, names) {
+  const picked = [...names];
+  return (model.rows || []).filter(
+    (row) => row.member && picked.some((name) => row.member.includes(name)));
+}
+
+/** 選んだ行だけの集計 (サーバが全体に出すものと同じ数え方)。 */
+function totalsFor(rows) {
+  const done = rows.filter((r) => r.progress != null && r.progress >= 1);
+  const running = rows.filter((r) => r.actual_start
+    && !(r.progress != null && r.progress >= 1));
+  const planned = rows.filter((r) => r.start);
+  const weight = planned.reduce((n, r) => n + (r.days || 1), 0) || 1;
+  const starts = rows.map((r) => r.start).filter(Boolean).sort();
+  const ends = rows.map((r) => r.end).filter(Boolean).sort();
+  return {
+    rows: rows.length,
+    done: done.length,
+    running: running.length,
+    delayed: rows.filter((r) => r.delay).length,
+    effort: Math.round(rows.reduce((n, r) => n + (r.effort || 0), 0) * 10) / 10,
+    progress: planned.reduce((n, r) => n + (r.progress || 0) * (r.days || 1), 0) / weight,
+    first_day: starts[0] || null,
+    last_day: ends[ends.length - 1] || null,
+  };
+}
+
+/** 担当者を選ぶ欄 (チェックを付けた人のタスクが下に出る)。 */
+function memberPicker(model) {
+  const people = model.people || [];
+  const box = el('div', { class: 'member-picker' });
+  box.append(el('div', { class: 'member-actions' },
+    el('strong', { text: t('member_pick') }),
+    el('button', {
+      type: 'button', class: 'btn small', text: t('member_all'),
+      onclick: () => { pickedMembers = new Set(people); redraw(); },
+    }),
+    el('button', {
+      type: 'button', class: 'btn small', text: t('member_clear'),
+      onclick: () => { pickedMembers = new Set(); redraw(); },
+    })));
+  const list = el('div', { class: 'member-list' });
+  for (const name of people) {
+    const count = rowsOf(model, [name]).length;
+    const input = el('input', { type: 'checkbox' });
+    input.checked = pickedMembers.has(name);
+    input.addEventListener('change', () => {
+      if (input.checked) pickedMembers.add(name); else pickedMembers.delete(name);
+      redraw();
+    });
+    list.append(el('label', { class: `member-chip${input.checked ? ' on' : ''}` },
+      input, el('span', { text: name }), el('span', { class: 'count', text: String(count) })));
+  }
+  box.append(list);
+  return box;
+}
+
+function renderMemberView(model) {
+  const picked = (model.people || []).filter((name) => pickedMembers.has(name));
+  const rows = picked.length ? rowsOf(model, picked) : [];
+  const shown = {
+    ...model,
+    rows,
+    title: picked.length
+      ? t('member_title', { names: picked.join('、') }) : model.title,
+    totals: picked.length ? totalsFor(rows) : null,
+    info: picked.length
+      ? t('member_info', { n: picked.length, rows: rows.length })
+      : t('member_pick'),
+    empty: !picked.length ? t('member_empty')
+      : (!rows.length ? t('member_no_rows') : ''),
+  };
+  renderChart(shown, [memberPicker(model)]);
 }
 
 /** 画面幅や列の指定が変わったときに、同じ内容を描き直す。 */
@@ -1556,6 +1657,7 @@ async function importFile(file) {
   }
   cellEdits = {};
   loadPick = null;
+  pickedMembers = new Set();
   return importBytes(file.name, bytes, DEFAULT_CHART_UNIT, true);
 }
 
@@ -1579,6 +1681,7 @@ async function importBytes(name, bytes, unit = null, announce = false, edits = n
     loaded = { name, bytes, edits: edits || {} };
     fillMonths(model.workload || []);
     fillNetworkAvailability(model.network);
+    fillMemberAvailability(model.people || []);
     setMode('chart');
     $('#chart-unit').value = model.timeline.unit;
     render({
@@ -1592,6 +1695,7 @@ async function importBytes(name, bytes, unit = null, announce = false, edits = n
       workload: model.workload || [],
       daily: model.daily || null,
       network: model.network || null,
+      people: model.people || [],
       info: t('info_chart', {
         start: model.timeline.start, end: model.timeline.end,
         columns: model.timeline.columns.length, rows: model.rows.length,
@@ -1646,6 +1750,12 @@ function fillMonths(months) {
 }
 
 /** 項番の入った行が無いと矢印を引けない。その選択肢だけ止める。 */
+function fillMemberAvailability(people) {
+  const option = $('#view').querySelector('option[value=member]');
+  if (option) option.disabled = !people.length;
+  if (view === 'member' && !people.length) view = 'chart';
+}
+
 function fillNetworkAvailability(network) {
   const hasNodes = !!(network && network.precedence && network.precedence.nodes.length);
   const option = $('#view').querySelector('option[value=network]');
@@ -1655,7 +1765,7 @@ function fillNetworkAvailability(network) {
 
 function applyView() {
   const chart = mode === 'chart';
-  const gantt = chart && view === 'chart';
+  const gantt = chart && (view === 'chart' || view === 'member');
   const load = chart && view === 'load';
   const network = chart && view === 'network';
   $('#view').value = view;          // 「戻る」でガントチャートに戻したときも合わせる
@@ -1754,7 +1864,7 @@ function fillChoices() {
   $('#unit').value = unit;
   $('#chart-unit').replaceChildren(...options());
   $('#chart-unit').value = chartUnit;
-  $('#view').replaceChildren(...['chart', 'daily', 'load', 'network'].map(
+  $('#view').replaceChildren(...['chart', 'member', 'daily', 'load', 'network'].map(
     (v) => el('option', { value: v, text: t(`view_${v}`) })));
   $('#view').value = view;
   $('#network-type').replaceChildren(...['precedence', 'arrow'].map(

@@ -224,3 +224,15 @@ def test_the_unit_can_be_overridden(filled_book, unit, columns):
     # 単位を変えてもバーの示す期間は同じ
     row = next(r for r in model["rows"] if r["no"] == "101")
     assert row["start"] == "2026-04-01" and row["end"] == "2026-04-14"
+
+
+def test_the_model_lists_the_people_named_in_the_owner_column(model):
+    """担当者別の画面で選べるよう、担当欄を 1 人ずつに分けた名前を返す。"""
+    assert model["people"] == ["設計", "製造", "テスト"]
+
+
+def test_people_are_split_out_of_a_shared_cell(make_filled):
+    rows = [("開発", "", "1", "共同作業", dt.date(2026, 4, 1), 5, dt.date(2026, 4, 7),
+             None, None, None, None, None, "", "吉田/菊池（高瀬）", "")]
+    model = build_chart(read(make_filled(rows=rows)), base_date=BASE)
+    assert model["people"] == ["吉田", "菊池", "高瀬"]
