@@ -19,7 +19,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .. import __version__, workbook
+from .. import __version__, convert, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
 from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
@@ -161,16 +161,27 @@ def _chart_suffix(spec: BlankWBS) -> str:
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 XLSM_TYPE = "application/vnd.ms-excel.sheet.macroEnabled.12"
+XLS_TYPE = "application/vnd.ms-excel"
 
 
-def _extension(macro: bool) -> str:
-    """書き出すファイルの拡張子。マクロ有効の本で読んだら .xlsm のまま返す。"""
-    return "xlsm" if macro else "xlsx"
+def _kind(imported) -> tuple:
+    """書き出すファイルの ``(拡張子, メディアタイプ)``。読み込んだ形式と同じにする。"""
+    if imported.legacy:
+        return "xls", XLS_TYPE
+    if imported.macro:
+        return "xlsm", XLSM_TYPE
+    return "xlsx", XLSX_TYPE
 
 
-def _filename(spec: BlankWBS, suffix: str = "", macro: bool = False) -> str:
+def _filename(spec: BlankWBS, suffix: str = "", extension: str = "xlsx") -> str:
     stem = "".join(c for c in spec.title if c not in '\\/:*?"<>|').strip()
-    return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.{_extension(macro)}")
+    return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.{extension}")
+
+
+def _disposition(imported, suffix: str = "") -> str:
+    extension, _type = _kind(imported)
+    return (f"attachment; filename=wbs.{extension};"
+            f" filename*=UTF-8''{_filename(imported.spec, suffix, extension)}")
 
 
 # ----------------------------------------------------------------------
@@ -215,14 +226,27 @@ async def _read_upload(file: UploadFile, unit: Optional[str], language: str,
 
     name = Path(file.filename or "wbs.xlsx").name
     suffix = Path(name).suffix.lower()
-    if suffix not in (".xlsx", ".xlsm"):
+    if suffix not in (".xlsx", ".xlsm", ".xls"):
         raise HTTPException(status_code=415, detail=message(
             language, "unsupported_format",
             suffix=suffix or message(language, "no_suffix")))
+    converted = None
+    if suffix == ".xls":
+        # 旧形式は .xlsx に直して読む。書き出しで .xls に戻す。
+        try:
+            converted = convert.to_xlsx(raw)
+        except convert.ConvertError as exc:
+            raise HTTPException(
+                status_code=501 if exc.reason == "missing" else 422,
+                detail=message(language, "xls_needs_office" if exc.reason == "missing"
+                               else "xls_failed", reason=exc))
     try:
-        imported = read_workbook(io.BytesIO(raw), filename=name, language=language)
+        imported = read_workbook(io.BytesIO(converted or raw), filename=name,
+                                 language=language)
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    if converted:
+        imported.legacy, imported.converted = True, converted
 
     if unit:
         if unit not in VALID_UNITS:
@@ -250,21 +274,17 @@ async def export_workbook(
 
     画面に出しているのと同じバーを、浮動図形として書き込む。
     """
-    imported = await _read_upload(file, unit, normalize(lang), edits)
+    language = normalize(lang)
+    imported = await _read_upload(file, unit, language, edits)
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / f"wbs.{_extension(imported.macro)}"
+        path = Path(tmp) / "wbs.xlsx"
         workbook.export(imported, path)
-        data = path.read_bytes()
+        data = _finish(imported, path.read_bytes(), language)
 
     return Response(
         content=data,
-        media_type=XLSM_TYPE if imported.macro else XLSX_TYPE,
-        headers={
-            "Content-Disposition":
-                f"attachment; filename=wbs.{_extension(imported.macro)};"
-                f" filename*=UTF-8''"
-                f"{_filename(imported.spec, _chart_suffix(imported.spec), imported.macro)}",
-        },
+        media_type=_kind(imported)[1],
+        headers={"Content-Disposition": _disposition(imported, _chart_suffix(imported.spec))},
     )
 
 
@@ -279,21 +299,32 @@ async def number_workbook(
     imported = await _read_upload(file, None, language, edits)
     await file.seek(0)
     try:
-        data, count = assign_numbers(io.BytesIO(await file.read()), language,
+        # 旧形式は、直した .xlsx に項番を書き込んで、.xls に戻す
+        source = imported.converted or await file.read()
+        data, count = assign_numbers(io.BytesIO(source), language,
                                      _parse_edits(edits, language), imported.macro)
+        data = _finish(imported, data, language)
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return Response(
         content=data,
-        media_type=XLSM_TYPE if imported.macro else XLSX_TYPE,
+        media_type=_kind(imported)[1],
         headers={
-            "Content-Disposition":
-                f"attachment; filename=wbs.{_extension(imported.macro)};"
-                f" filename*=UTF-8''"
-                f"{_filename(imported.spec, _number_suffix(imported.spec), imported.macro)}",
+            "Content-Disposition": _disposition(imported, _number_suffix(imported.spec)),
             "X-Numbered-Rows": str(count),
         },
     )
+
+
+def _finish(imported, data: bytes, language: str) -> bytes:
+    """書き出す中身を、読み込んだ形式に合わせる (旧形式なら .xls に戻す)。"""
+    if not imported.legacy:
+        return data
+    try:
+        return convert.to_xls(data)
+    except convert.ConvertError as exc:
+        raise HTTPException(status_code=422,
+                            detail=message(language, "xls_failed", reason=exc))
 
 
 def _number_suffix(spec: BlankWBS) -> str:

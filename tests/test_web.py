@@ -624,3 +624,48 @@ def test_export_of_an_xlsx_stays_xlsx(client, filled_book):
     assert ".xlsx" in response.headers["content-disposition"]
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
         assert "xl/vbaProject.bin" not in zf.namelist()
+
+
+# ---------------------------------------------------------------- xls
+needs_office = pytest.mark.skipif(
+    not __import__("wbsgen.convert", fromlist=["x"]).available(),
+    reason="LibreOffice (soffice) が必要")
+XLS_MAGIC = b"\xd0\xcf\x11\xe0"
+
+
+@pytest.fixture
+def xls_book(filled_book):
+    from wbsgen import convert
+
+    return convert.to_xls(filled_book.read_bytes())
+
+
+@needs_office
+def test_an_xls_is_read_and_exported_as_xls(client, xls_book):
+    body = client.post("/api/import", files={"file": ("f.xls", xls_book, "x")})
+    assert body.status_code == 200
+    assert len(body.json()["rows"]) == 5
+
+    response = client.post("/api/export", files={"file": ("f.xls", xls_book, "x")})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/vnd.ms-excel")
+    assert ".xls" in response.headers["content-disposition"]
+    assert ".xlsx" not in response.headers["content-disposition"]
+    assert response.content[:4] == XLS_MAGIC
+
+
+@needs_office
+def test_numbering_an_xls_returns_an_xls(client, xls_book):
+    response = client.post("/api/number", files={"file": ("f.xls", xls_book, "x")})
+    assert response.status_code == 200
+    assert response.content[:4] == XLS_MAGIC
+
+
+def test_an_xls_without_libreoffice_is_explained(client, monkeypatch):
+    from wbsgen import convert
+
+    monkeypatch.setattr(convert, "office_command", lambda: None)
+    convert._cache.clear()
+    response = client.post("/api/import", files={"file": ("f.xls", b"data", "x")})
+    assert response.status_code == 501
+    assert "LibreOffice" in response.json()["detail"]

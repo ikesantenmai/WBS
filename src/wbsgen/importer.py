@@ -173,6 +173,10 @@ class ImportedWBS:
     source: Optional[bytes] = None
     #: マクロ有効の形式 (.xlsm、またはマクロ入り) か。書き出しも同じ形式にする。
     macro: bool = False
+    #: 旧形式 (.xls) で読み込んだか。書き出しも .xls に戻す。
+    legacy: bool = False
+    #: .xls を .xlsx に直した中身 (旧形式のときだけ)。以降の処理はこれを読む。
+    converted: Optional[bytes] = None
 
 
 # ----------------------------------------------------------------------
