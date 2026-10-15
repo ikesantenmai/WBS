@@ -149,6 +149,11 @@ def _cmd_serve(args) -> int:
         print(text(lang, "serving_hosted", port=args.port))
     else:
         print(text(lang, "serving", host=args.host, port=args.port))
+    # デプロイ先のログで、.xls が使えるかを確かめられるようにする
+    from . import convert
+
+    print(".xls: " + ("LibreOffice " + convert.office_command() if convert.available()
+                      else "LibreOffice not found (.xls disabled)"), flush=True)
     serve(host=args.host, port=args.port, reload=args.reload)
     return 0
 

@@ -5,7 +5,8 @@ FROM python:3.12-slim
 # libreoffice-calc: .xls <-> .xlsx の変換 / fonts-noto-cjk: 日本語の文字
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libreoffice-calc fonts-noto-cjk \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && soffice --version
 
 WORKDIR /app
 COPY pyproject.toml README.md ./

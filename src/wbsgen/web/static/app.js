@@ -57,6 +57,8 @@ const UI = {
     import: 'Excel を読み込む',
     back: '新規作成に戻る',
     export: 'ガントチャート付きで書き出す',
+    xls_on: '.xls の読み書き: 使えます (LibreOffice あり)',
+    xls_off: '.xls の読み書き: 使えません (サーバーに LibreOffice がありません)',
     recalc: '再計算',
     recalc_count: '再計算 ({n} 件の変更)',
     recalculated: '再計算しました。ガントチャート・本日の状況・要員稼働・ネットワーク図を更新しました。',
@@ -209,6 +211,8 @@ const UI = {
     import: 'Import Excel',
     back: 'Back to new sheet',
     export: 'Export with Gantt chart',
+    xls_on: '.xls support: available (LibreOffice found)',
+    xls_off: '.xls support: unavailable (LibreOffice is not installed on the server)',
     recalc: 'Recalculate',
     recalc_count: 'Recalculate ({n} changes)',
     recalculated: 'Recalculated. The Gantt chart, today\'s status, workload and network diagram are updated.',
@@ -2034,6 +2038,7 @@ async function start() {
     return;
   }
   $('#version').textContent = meta.version ? `wbsgen ${meta.version}` : '';
+  $('#version').title = t(meta.xls_supported ? 'xls_on' : 'xls_off');
   $('#language').replaceChildren(...meta.languages.map(
     (l) => el('option', { value: l.value, text: l.label })));
   $('#language').value = language;

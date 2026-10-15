@@ -64,6 +64,8 @@ def meta(lang: Optional[str] = Query(None, description="表示言語 (ja/en)")) 
     year = today.year if today.month >= 4 else today.year - 1
     return {
         "version": __version__,
+        # .xls を扱える (LibreOffice が入っている) か。デプロイ先の確認に使う
+        "xls_supported": convert.available(),
         "language": language,
         "languages": [
             {"value": "ja", "label": "日本語"},
