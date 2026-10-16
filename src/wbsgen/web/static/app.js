@@ -595,8 +595,12 @@ function renderChart(view, extra = []) {
   const width = timeline.columns.length * colW;
 
   // 表が広いまま貼り付くと日程表に届かないので、そのときは一緒に流す
-  const grid = el('div', { class: `grid${isCompact() ? '' : ' scroll-table'}` },
-    el('div', { class: 'table-wrap' }, buildTable(view, rowCount, withWeekday)),
+  // 長い文字に合わせて広げた列で、表の幅を決める
+  const columns = fitColumns(tableColumns(), view.rows || []);
+  const tableWidth = columns.reduce((total, column) => total + column.width, 0);
+  const sticky = isCompact() && tableWidth <= window.innerWidth * STICKY_MAX_RATIO;
+  const grid = el('div', { class: `grid${sticky ? '' : ' scroll-table'}` },
+    el('div', { class: 'table-wrap' }, buildTable(view, rowCount, withWeekday, columns)),
     el('div', { class: 'chart-wrap' },
       chartHead(timeline, colW, width, headH, withWeekday),
       chartBody(view, colW, width, bodyH, rowCount)),
@@ -1339,8 +1343,61 @@ function warningBox(warnings) {
 }
 
 // ---------------------------------------------------------------- 表
-function buildTable(view, rowCount, withWeekday) {
-  const columns = tableColumns();
+//: 文字が長い列を広げるときの余白 (セルの左右の余白と罫線のぶん)
+const FIT_PADDING = 14;
+//: 狭い画面で表を貼り付けたままにしてよい幅 (画面幅に対する割合)。これより広い
+//: 表は、日程表と一緒に横へ流す (貼り付けると日程表を隠してしまう)。
+const STICKY_MAX_RATIO = 0.6;
+
+let measureContext = null;
+
+/** 表の文字の実際の幅 (px)。測れない環境では文字の種類から見積もる。 */
+function measureText(text) {
+  try {
+    if (!measureContext) {
+      measureContext = document.createElement('canvas').getContext('2d');
+      measureContext.font = `11px ${getComputedStyle(document.body).fontFamily}`;
+    }
+    return measureContext.measureText(String(text || '')).width;
+  } catch (error) {
+    return textWidth(text, 11);
+  }
+}
+
+/**
+ * 列の幅を、書かれている文字がすべて入る幅まで広げる (狭めはしない)。
+ * 項目名のように長い文字は、切れずに全部見える。
+ */
+function fitColumns(columns, rows) {
+  return columns.map((column) => {
+    let need = measureText(t('columns')[column.key]);
+    rows.forEach((row, i) => {
+      const edited = cellEdits[row.row] && cellEdits[row.row][column.key];
+      let text;
+      if (edited !== undefined) text = edited;
+      else if ((column.key === 'group' || column.key === 'subgroup')
+          && i > 0 && rows[i - 1][column.key] === row[column.key]) text = '';
+      else text = displayText(row, column.key);
+      let w = measureText(text);
+      if (column.key === 'status') w += 16;       // 状態の札の余白
+      need = Math.max(need, w);
+    });
+    return { ...column, width: Math.max(column.width, Math.ceil(need + FIT_PADDING)) };
+  });
+}
+
+/** 表のセルに出す文字 (tableCellContent と同じ書き方)。 */
+function displayText(row, key) {
+  const value = row[key];
+  if (key === 'progress') return value == null ? '' : `${Math.round(value * 100)}%`;
+  if (['days', 'actual_days', 'delay'].includes(key)) {
+    return value == null ? '' : `${value} ${t('unit_days')}`;
+  }
+  if (/start|end$/.test(key)) return shortDate(value);
+  return value == null ? '' : String(value);
+}
+
+function buildTable(view, rowCount, withWeekday, columns) {
   const cols = el('colgroup');
   for (const column of columns) cols.append(el('col', { style: `width:${column.width}px` }));
   // 表そのものの幅も決めておく。決めないと、長い担当名などに引きずられて

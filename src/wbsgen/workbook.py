@@ -160,6 +160,21 @@ def _precedence(rows):
     return _network(rows)["precedence"]
 
 
+#: 長い文字の列を広げるときの余白 (px)
+FIT_PADDING_PX = 12
+
+
+def _text_px(text) -> float:
+    """Excel の標準フォント (10pt の MS P ゴシック) で、文字がおおよそ占める幅 (px)。
+
+    全角は半角のほぼ 2 倍。行頭の空白で字下げした項目名も、空白のぶん含める。
+    """
+    import unicodedata
+
+    return sum(13.4 if unicodedata.east_asian_width(ch) in "WF" else 7.0
+               for ch in str(text or ""))
+
+
 def _md(day: _dt.date, since: _dt.date = None) -> str:
     """タイトルに出す日付。同じ年なら年を省く (2026/9/3〜9/30)。"""
     if since is not None and since.year == day.year:
@@ -194,6 +209,8 @@ class _Writer:
         self.timeline = Timeline(spec.start, spec.period_days, spec.unit,
                                  self.calendar, spec.language)
         self.chart_col_px = style.CHART_COL_WIDTH_PX[spec.unit]
+        #: 表側の列幅 (px)。長い文字が入る列は、全部見えるように広げてある。
+        self.col_px = self._fit_widths()
         # 日単位表示では見出しの下に曜日の行が入る
         self.first_row = ROW_HEADER + (2 if spec.unit == UNIT_DAY else 1)
         self.last_row = self.first_row + max(len(self.rows) + spec.rows, 1) - 1
@@ -308,8 +325,23 @@ class _Writer:
             return self.labels.days_format
         return value
 
+    #: 文字の長さに合わせて広げる列
+    FIT_COLUMNS = {
+        "group": style.COL_GROUP, "subgroup": style.COL_SUBGROUP, "no": style.COL_NO,
+        "name": style.COL_NAME, "predecessor": style.COL_PRED, "member": style.COL_MEMBER,
+    }
+
+    def _fit_widths(self) -> Dict[str, float]:
+        """表側の列幅。書かれている文字がすべて入る幅まで広げる (狭めはしない)。"""
+        widths = dict(style.COLUMN_WIDTHS_PX)
+        for key, letter in self.FIT_COLUMNS.items():
+            for row in self.rows:
+                need = _text_px(getattr(row, key, "")) + FIT_PADDING_PX
+                widths[letter] = max(widths.get(letter, 0), need)
+        return widths
+
     def _columns(self, ws: Worksheet) -> None:
-        for letter, px in style.COLUMN_WIDTHS_PX.items():
+        for letter, px in self.col_px.items():
             ws.column_dimensions[letter].width = style.px_to_width(px)
         ws.column_dimensions[style.COL_SHAPE].hidden = True
         chart_width = style.px_to_width(self.chart_col_px)
@@ -540,7 +572,7 @@ class _Writer:
         return self._colors.get(member, style.MEMBER_PALETTE[0])
 
     def _geometry(self) -> Geometry:
-        table = style.COLUMN_WIDTHS_PX
+        table = self.col_px
         chart_px = self.chart_col_px
 
         def col_px(col0: int) -> float:

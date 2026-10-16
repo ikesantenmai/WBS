@@ -216,3 +216,39 @@ def test_export_draws_a_dashed_bar_for_a_running_task(make_filled, tmp_path):
     finished = [part for part in drawing.split("<xdr:twoCellAnchor")
                 if 'name="actual-101' in part]
     assert 'prstDash' not in finished[0]
+
+
+def test_long_text_widens_its_column_in_the_export(make_filled, tmp_path):
+    """長い項目名・大項目・担当は、列を広げて全部見えるようにする (狭めはしない)。"""
+    import datetime as dt
+
+    import openpyxl
+
+    from wbsgen import style
+    from wbsgen.importer import read
+    from wbsgen.workbook import export
+
+    long_name = "基本設計書の作成と社内レビュー、顧客への説明資料の準備を含む非常に長い項目名" * 2
+    rows = [("とても長い大項目の名前がここに入ります", "", "1", long_name,
+             dt.date(2026, 4, 1), 5, dt.date(2026, 4, 7), None, None, None, None, None,
+             "", "吉田/菊池/長見/本家/池田", ""),
+            ("短", "", "2", "短い", dt.date(2026, 4, 8), 3, dt.date(2026, 4, 10),
+             None, None, None, None, None, "", "吉田", "")]
+    out = export(read(make_filled(rows=rows)), tmp_path / "out.xlsx")
+    sheet = openpyxl.load_workbook(out)["スケジュール"]
+    px = lambda letter: style.width_to_px(sheet.column_dimensions[letter].width)
+    assert px(style.COL_NAME) > style.COLUMN_WIDTHS_PX[style.COL_NAME] * 2
+    assert px(style.COL_GROUP) > style.COLUMN_WIDTHS_PX[style.COL_GROUP]
+    assert px(style.COL_MEMBER) > style.COLUMN_WIDTHS_PX[style.COL_MEMBER]
+    assert px(style.COL_START) == style.COLUMN_WIDTHS_PX[style.COL_START]   # 日付は広げない
+
+
+def test_short_text_keeps_the_default_widths(exported):
+    import openpyxl
+
+    from wbsgen import style
+
+    sheet = openpyxl.load_workbook(exported)["スケジュール"]
+    for letter in (style.COL_NAME, style.COL_GROUP, style.COL_MEMBER):
+        assert style.width_to_px(sheet.column_dimensions[letter].width) \
+            == style.COLUMN_WIDTHS_PX[letter]
