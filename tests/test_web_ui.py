@@ -791,8 +791,10 @@ def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled):
          None, None, None, 0, 5, "", "吉田", ""),
     ])
     page.set_input_files("#import-file", str(book))
+    # ページは他のテストと共有なので、前の表が消えて、今の表が出るまで待つ
     page.wait_for_function(
-        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+        "() => [...document.querySelectorAll('table.wbs tbody td.name')]"
+        ".some(td => td.textContent.startsWith('基本設計書'))")
 
     info = page.evaluate("""() => {
         const trs = [...document.querySelectorAll('table.wbs tbody tr')]
