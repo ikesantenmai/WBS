@@ -591,19 +591,20 @@ function renderChart(view, extra = []) {
   const headH = HEAD_H * (withWeekday ? 3 : 2);
   const rowCount = view.rows.length
     || Math.min(view.blankRows || 0, PREVIEW_ROW_LIMIT);
-  const bodyH = Math.max(rowCount, 1) * ROW_H;
   const width = timeline.columns.length * colW;
 
-  // 表が広いまま貼り付くと日程表に届かないので、そのときは一緒に流す
-  // 長い文字に合わせて広げた列で、表の幅を決める
-  const columns = fitColumns(tableColumns(), view.rows || []);
+  // 画面に収まるよう列の幅を決め、長い文字は折り返して行を高くする
+  const columns = layoutColumns(tableColumns(), view.rows || []);
+  const heights = rowHeights(view.rows || [], rowCount, columns);
+  const bodyH = Math.max(heights.reduce((n, h) => n + h, 0), ROW_H);
   const tableWidth = columns.reduce((total, column) => total + column.width, 0);
+  // 表が広いまま貼り付くと日程表に届かないので、そのときは一緒に流す
   const sticky = isCompact() && tableWidth <= window.innerWidth * STICKY_MAX_RATIO;
   const grid = el('div', { class: `grid${sticky ? '' : ' scroll-table'}` },
-    el('div', { class: 'table-wrap' }, buildTable(view, rowCount, withWeekday, columns)),
+    el('div', { class: 'table-wrap' }, buildTable(view, rowCount, withWeekday, columns, heights)),
     el('div', { class: 'chart-wrap' },
       chartHead(timeline, colW, width, headH, withWeekday),
-      chartBody(view, colW, width, bodyH, rowCount)),
+      chartBody(view, colW, width, heights)),
   );
 
   const parts = [el('div', { class: 'sheet-title', text: view.title })];
@@ -612,6 +613,7 @@ function renderChart(view, extra = []) {
   if (view.empty) parts.push(el('p', { class: 'empty-note', text: view.empty }));
   else parts.push(grid);
   $('#sheet').replaceChildren(...parts);
+  if (!view.empty) syncChartRows(grid, view, colW, width, heights);
 
   const limited = view.blankRows > rowCount ? t('info_limited', { n: rowCount }) : '';
   $('#preview-info').textContent = view.info + limited;
@@ -1343,13 +1345,25 @@ function warningBox(warnings) {
 }
 
 // ---------------------------------------------------------------- 表
-//: 文字が長い列を広げるときの余白 (セルの左右の余白と罫線のぶん)
+//: 列の左右の余白と罫線のぶん (px)
 const FIT_PADDING = 14;
+//: 長い文字を折り返す列 (表が画面に収まらないとき、これらの幅を縮めて行を高くする)
+const WRAP_KEYS = ['group', 'subgroup', 'name', 'member', 'predecessor'];
+//: 幅を分けるときの重み (項目名にいちばん多く)
+const WRAP_WEIGHT = { name: 3, group: 1, subgroup: 1, member: 1.2, predecessor: 0.8 };
+//: 折り返す列の最小の幅 (px)
+const WRAP_MIN = 48;
+//: 表を画面幅のどれだけまで使うか (残りは日程表に使う)
+const TABLE_RATIO = 0.72;
+//: 折り返した文字の 1 行の高さと、セルの上下の余白 (px)
+const LINE_H = 14;
+const CELL_PAD_Y = 5;
 //: 狭い画面で表を貼り付けたままにしてよい幅 (画面幅に対する割合)。これより広い
 //: 表は、日程表と一緒に横へ流す (貼り付けると日程表を隠してしまう)。
 const STICKY_MAX_RATIO = 0.6;
 
 let measureContext = null;
+const charWidths = new Map();
 
 /** 表の文字の実際の幅 (px)。測れない環境では文字の種類から見積もる。 */
 function measureText(text) {
@@ -1364,26 +1378,81 @@ function measureText(text) {
   }
 }
 
+/** 1 文字の幅 (折り返しの行数を数えるために覚えておく)。 */
+function charWidth(ch) {
+  if (!charWidths.has(ch)) charWidths.set(ch, measureText(ch));
+  return charWidths.get(ch);
+}
+
+/** ``maxWidth`` の中に文字を詰めたときの行数 (どの文字でも折り返せるものとして数える)。 */
+function wrapLines(text, maxWidth) {
+  let lines = 1;
+  let used = 0;
+  for (const ch of String(text || '')) {
+    if (ch === '\n') { lines += 1; used = 0; continue; }
+    const w = charWidth(ch);
+    if (used + w > maxWidth && used > 0) { lines += 1; used = w; } else used += w;
+  }
+  return lines;
+}
+
+/** 表に使える幅 (画面幅から決める)。ノート型パソコンでも横に流さず収める。 */
+function tableBudget() {
+  const room = window.innerWidth - 40;
+  return Math.max(Math.min(window.innerWidth * TABLE_RATIO, room), Math.min(760, room));
+}
+
+/** セルに出す文字 (編集中ならその文字)。 */
+function cellText(rows, i, key) {
+  const row = rows[i];
+  const edited = cellEdits[row.row] && cellEdits[row.row][key];
+  if (edited !== undefined) return edited;
+  // 大項目・中項目は、変わったところにだけ出す
+  if ((key === 'group' || key === 'subgroup') && i > 0 && rows[i - 1][key] === row[key]) return '';
+  return displayText(row, key);
+}
+
 /**
- * 列の幅を、書かれている文字がすべて入る幅まで広げる (狭めはしない)。
- * 項目名のように長い文字は、切れずに全部見える。
+ * 列の幅を決める。
+ *
+ * まず、書かれている文字が 1 行に入る幅 (自然な幅) を測る。表がまるごと
+ * 画面に収まるならそのまま使う。収まらないときは、日付や日数の列は自然な幅の
+ * ままにして、文字の長い列 (大項目・中項目・項目・担当・先行) の幅を縮め、
+ * 入りきらない文字は折り返す。短い列には余分な幅を渡さず、残りを重みづけで分ける。
  */
-function fitColumns(columns, rows) {
-  return columns.map((column) => {
+function layoutColumns(columns, rows) {
+  const natural = columns.map((column) => {
     let need = measureText(t('columns')[column.key]);
     rows.forEach((row, i) => {
-      const edited = cellEdits[row.row] && cellEdits[row.row][column.key];
-      let text;
-      if (edited !== undefined) text = edited;
-      else if ((column.key === 'group' || column.key === 'subgroup')
-          && i > 0 && rows[i - 1][column.key] === row[column.key]) text = '';
-      else text = displayText(row, column.key);
-      let w = measureText(text);
+      let w = measureText(cellText(rows, i, column.key));
       if (column.key === 'status') w += 16;       // 状態の札の余白
       need = Math.max(need, w);
     });
-    return { ...column, width: Math.max(column.width, Math.ceil(need + FIT_PADDING)) };
+    return Math.max(column.width, Math.ceil(need + FIT_PADDING));
   });
+  const widths = natural.slice();
+
+  let open = columns.map((c, i) => i).filter((i) => WRAP_KEYS.includes(columns[i].key));
+  let room = tableBudget() - columns.reduce(
+    (n, c, i) => n + (open.includes(i) ? 0 : natural[i]), 0);
+  const weight = (i) => WRAP_WEIGHT[columns[i].key] || 1;
+  // 自然な幅が分け前より小さい列は、その幅で確定し、残りで分け直す
+  for (let again = true; again && open.length;) {
+    again = false;
+    const total = open.reduce((n, i) => n + weight(i), 0);
+    for (const i of open) {
+      if (natural[i] <= room * weight(i) / total) {
+        room -= natural[i];
+        open = open.filter((j) => j !== i);
+        again = true;
+        break;
+      }
+    }
+  }
+  const total = open.reduce((n, i) => n + weight(i), 0);
+  for (const i of open) widths[i] = Math.max(WRAP_MIN, Math.floor(room * weight(i) / total));
+
+  return columns.map((column, i) => ({ ...column, width: widths[i] }));
 }
 
 /** 表のセルに出す文字 (tableCellContent と同じ書き方)。 */
@@ -1397,7 +1466,23 @@ function displayText(row, key) {
   return value == null ? '' : String(value);
 }
 
-function buildTable(view, rowCount, withWeekday, columns) {
+/** 各行の高さ (px)。折り返して最も行数の多いセルに合わせる。 */
+function rowHeights(rows, rowCount, columns) {
+  const out = [];
+  for (let r = 0; r < rowCount; r++) {
+    let lines = 1;
+    if (rows[r]) {
+      for (const column of columns) {
+        if (!WRAP_KEYS.includes(column.key)) continue;
+        lines = Math.max(lines, wrapLines(cellText(rows, r, column.key), column.width - FIT_PADDING));
+      }
+    }
+    out.push(Math.max(ROW_H, lines * LINE_H + CELL_PAD_Y * 2));
+  }
+  return out;
+}
+
+function buildTable(view, rowCount, withWeekday, columns, heights = []) {
   const cols = el('colgroup');
   for (const column of columns) cols.append(el('col', { style: `width:${column.width}px` }));
   // 表そのものの幅も決めておく。決めないと、長い担当名などに引きずられて
@@ -1426,7 +1511,7 @@ function buildTable(view, rowCount, withWeekday, columns) {
   const body = el('tbody');
   for (let r = 0; r < rowCount; r++) {
     const row = view.rows[r] || null;
-    const tr = el('tr');
+    const tr = el('tr', { style: heights[r] ? `height:${heights[r]}px` : '' });
     for (const column of columns) tr.append(tableCell(row, column, view.rows[r - 1]));
     body.append(tr);
   }
@@ -1434,7 +1519,8 @@ function buildTable(view, rowCount, withWeekday, columns) {
 }
 
 function tableCell(row, column, previous) {
-  const td = el('td', { class: `${column.cls || ''}${column.plan ? ' plan' : ''}` });
+  const wrap = WRAP_KEYS.includes(column.key) ? ' wrap' : '';
+  const td = el('td', { class: `${column.cls || ''}${column.plan ? ' plan' : ''}${wrap}` });
   if (!row) return td;
   const cell = tableCellContent(td, row, column, previous);
   if (mode === 'chart') makeEditable(cell, row, column);
@@ -1572,8 +1658,21 @@ function chartHead(timeline, colW, width, height, withWeekday) {
 }
 
 // ---------------------------------------------------------------- 日程表の本体
-function chartBody(view, colW, width, height, rowCount) {
+/**
+ * 表の行の高さは、折り返しの結果としてブラウザが決める。見積もりとずれていたら、
+ * 実際の高さで日程表を描き直して、表の行とバーをそろえる。
+ */
+function syncChartRows(grid, view, colW, width, heights) {
+  const trs = grid.querySelectorAll('table.wbs tbody tr');
+  const actual = [...trs].map((tr) => tr.getBoundingClientRect().height);
+  if (!actual.length || actual.every((h, i) => Math.abs(h - heights[i]) < 0.5)) return;
+  const old = grid.querySelector('svg.chart-body');
+  if (old) old.replaceWith(chartBody(view, colW, width, actual));
+}
+
+function chartBody(view, colW, width, heights) {
   const { timeline } = view;
+  const height = Math.max(heights.reduce((n, h) => n + h, 0), ROW_H);
   const root = svg('svg', {
     class: 'chart-body', width, height, viewBox: `0 0 ${width} ${height}`,
   });
@@ -1591,14 +1690,25 @@ function chartBody(view, colW, width, height, rowCount) {
       stroke: 'var(--line-soft)', 'stroke-width': 1,
     }));
   });
-  for (let r = 0; r <= rowCount; r++) {
+  // 行の罫線と、行ごとの上端 (行の高さは行によって違う)
+  const tops = [];
+  let top = 0;
+  for (const h of heights) {
+    tops.push(top);
     root.append(svg('line', {
-      x1: 0, y1: r * ROW_H, x2: width, y2: r * ROW_H,
-      stroke: 'var(--line-soft)', 'stroke-width': 1,
+      x1: 0, y1: top, x2: width, y2: top, stroke: 'var(--line-soft)', 'stroke-width': 1,
     }));
+    top += h;
   }
+  root.append(svg('line', {
+    x1: 0, y1: top, x2: width, y2: top, stroke: 'var(--line-soft)', 'stroke-width': 1,
+  }));
 
-  view.rows.forEach((row, i) => root.append(...bars(row, i, colW)));
+  // バーは、高くなった行の縦の中央に置く
+  view.rows.forEach((row, i) => {
+    if (i >= heights.length) return;
+    root.append(...bars(row, tops[i] + (heights[i] - ROW_H) / 2, colW));
+  });
 
   if (view.nowX != null) {
     root.append(svg('line', {
@@ -1610,9 +1720,8 @@ function chartBody(view, colW, width, height, rowCount) {
 }
 
 /** 1 行ぶんのバー (予定・進捗・実績)。 */
-function bars(row, index, colW) {
+function bars(row, y, colW) {
   const out = [];
-  const y = index * ROW_H;
   if (!row.plan && !row.actual) return out;
 
   const withActual = !!row.actual;
@@ -2027,6 +2136,12 @@ function bind() {
   $('#columns-mode').addEventListener('change', (event) => {
     columnsMode = event.target.value;
     redraw();
+  });
+  // ウィンドウの幅が変わったら、表の列の幅を決め直す (描き直しは少し待ってから 1 回だけ)
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(redraw, 150);
   });
   // 画面を回したり幅が変わったら、その幅に合わせて描き直す
   for (const query of [NARROW, PHONE]) {

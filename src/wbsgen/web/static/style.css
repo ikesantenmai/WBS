@@ -206,7 +206,7 @@ table.wbs th.axis.rest { background: var(--holiday); color: var(--danger); }
 table.wbs th.axis.saturday { background: var(--saturday); color: #0070c0; }
 table.wbs td.plan { background: var(--plan-cell); color: var(--plan-ink); }
 /* 項目名は行頭の空白で階層を表すことがあるので、そのまま見せる */
-table.wbs td.name { text-align: left; white-space: pre; }
+table.wbs td.name { text-align: left; white-space: pre-wrap; }
 table.wbs td.group, table.wbs td.subgroup, table.wbs td.member { text-align: left; }
 table.wbs td.status span {
   display: inline-block; min-width: 52px; padding: 0 4px;
@@ -456,3 +456,10 @@ table.wbs.load td.picked { box-shadow: inset 0 0 0 2px var(--ink); }
 .member-chip.on { background: #e8f0fb; border-color: var(--accent); font-weight: 600; }
 .member-chip .count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .member-chip input { margin: 0; }
+
+/* 長い文字は列の中で折り返し、その行の高さを広げる */
+table.wbs td.wrap {
+  white-space: pre-wrap; overflow-wrap: anywhere; line-height: 14px;
+  padding-top: 5px; padding-bottom: 5px; vertical-align: middle;
+}
+table.wbs tbody td { vertical-align: middle; }

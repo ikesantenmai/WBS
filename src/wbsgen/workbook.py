@@ -162,6 +162,13 @@ def _precedence(rows):
 
 #: 長い文字の列を広げるときの余白 (px)
 FIT_PADDING_PX = 12
+#: 表側の幅の上限 (px)。ノート型パソコンの画面に、表と日程表の両方が入るように。
+TABLE_BUDGET_PX = 900
+#: 折り返す列の最小の幅 (px)
+WRAP_MIN_PX = 60
+#: 折り返した文字の 1 行の高さと、上下の余白 (pt)
+WRAP_LINE_PT = 13.5
+WRAP_PAD_PT = 4.0
 
 
 def _text_px(text) -> float:
@@ -173,6 +180,23 @@ def _text_px(text) -> float:
 
     return sum(13.4 if unicodedata.east_asian_width(ch) in "WF" else 7.0
                for ch in str(text or ""))
+
+
+def _wrap_lines(text, max_px: float) -> int:
+    """``max_px`` の幅に文字を詰めたときの行数 (どの文字でも折り返せるものとして数える)。"""
+    import unicodedata
+
+    lines, used = 1, 0.0
+    for ch in str(text or ""):
+        if ch == "\n":
+            lines, used = lines + 1, 0.0
+            continue
+        w = 13.4 if unicodedata.east_asian_width(ch) in "WF" else 7.0
+        if used + w > max_px and used > 0:
+            lines, used = lines + 1, w
+        else:
+            used += w
+    return lines
 
 
 def _md(day: _dt.date, since: _dt.date = None) -> str:
@@ -213,6 +237,8 @@ class _Writer:
         self.col_px = self._fit_widths()
         # 日単位表示では見出しの下に曜日の行が入る
         self.first_row = ROW_HEADER + (2 if spec.unit == UNIT_DAY else 1)
+        #: 折り返して高くした行の高さ (pt)。シートの行番号 (1 始まり) -> 高さ
+        self.row_pt = self._row_heights()
         self.last_row = self.first_row + max(len(self.rows) + spec.rows, 1) - 1
         self._colors = self._member_colors()
 
@@ -325,20 +351,71 @@ class _Writer:
             return self.labels.days_format
         return value
 
-    #: 文字の長さに合わせて広げる列
-    FIT_COLUMNS = {
-        "group": style.COL_GROUP, "subgroup": style.COL_SUBGROUP, "no": style.COL_NO,
-        "name": style.COL_NAME, "predecessor": style.COL_PRED, "member": style.COL_MEMBER,
+    #: 長い文字を折り返す列 (属性名 -> 列文字)。幅を分けるときの重みも添える。
+    WRAP_COLUMNS = {
+        "group": (style.COL_GROUP, 1.0), "subgroup": (style.COL_SUBGROUP, 1.0),
+        "name": (style.COL_NAME, 3.0), "predecessor": (style.COL_PRED, 0.8),
+        "member": (style.COL_MEMBER, 1.2),
     }
 
     def _fit_widths(self) -> Dict[str, float]:
-        """表側の列幅。書かれている文字がすべて入る幅まで広げる (狭めはしない)。"""
+        """表側の列幅 (px)。ノート型パソコンの画面に収まる幅を上限にする。
+
+        書かれている文字が 1 行に入る幅 (自然な幅) まで広げる。表の幅が上限
+        (:data:`TABLE_BUDGET_PX`、既定の幅の合計より狭くはしない) を超えるときは、
+        短い列に余分な幅を渡さず、残りを重みづけで分ける。入りきらない文字は
+        折り返し、その行の高さを広げる (:meth:`_row_heights`)。
+        """
         widths = dict(style.COLUMN_WIDTHS_PX)
-        for key, letter in self.FIT_COLUMNS.items():
-            for row in self.rows:
-                need = _text_px(getattr(row, key, "")) + FIT_PADDING_PX
-                widths[letter] = max(widths.get(letter, 0), need)
+        natural: Dict[str, float] = {}
+        for key, (letter, _weight) in self.WRAP_COLUMNS.items():
+            need = max((_text_px(getattr(row, key, "")) for row in self.rows), default=0)
+            natural[letter] = max(widths.get(letter, 0), need + FIT_PADDING_PX)
+
+        table = [letter for letter in TABLE_LETTERS]
+        fixed = sum(widths.get(letter, 0) for letter in table if letter not in natural)
+        defaults = sum(widths.get(letter, 0) for letter in table)
+        room = max(TABLE_BUDGET_PX, defaults) - fixed
+        weight = {letter: w for letter, w in self.WRAP_COLUMNS.values()}
+
+        open_ = list(natural)
+        again = True
+        while again and open_:
+            again = False
+            total = sum(weight[letter] for letter in open_)
+            for letter in open_:
+                if natural[letter] <= room * weight[letter] / total:
+                    widths[letter] = natural[letter]
+                    room -= natural[letter]
+                    open_.remove(letter)
+                    again = True
+                    break
+        total = sum(weight[letter] for letter in open_) or 1
+        for letter in open_:
+            widths[letter] = max(WRAP_MIN_PX, room * weight[letter] / total)
         return widths
+
+    def _row_heights(self) -> Dict[int, float]:
+        """読み込んだ各行の高さ (pt)。折り返して最も行数の多いセルに合わせる。"""
+        heights: Dict[int, float] = {}
+        previous = None
+        for index, row in enumerate(self.rows):
+            lines = 1
+            for key, (letter, _weight) in self.WRAP_COLUMNS.items():
+                text = getattr(row, key, "")
+                # 大項目・中項目は変わった行にだけ書く (書き込みと同じ規則で数える)
+                if previous is not None:
+                    same = previous.group == row.group
+                    if key == "group" and same:
+                        text = ""
+                    if key == "subgroup" and same and previous.subgroup == row.subgroup:
+                        text = ""
+                lines = max(lines, _wrap_lines(text, self.col_px[letter] - FIT_PADDING_PX))
+            if lines > 1:
+                heights[self.first_row + index] = max(
+                    style.ROW_HEIGHT_TASK, lines * WRAP_LINE_PT + WRAP_PAD_PT)
+            previous = row
+        return heights
 
     def _columns(self, ws: Worksheet) -> None:
         for letter, px in self.col_px.items():
@@ -479,8 +556,11 @@ class _Writer:
         previous = None
         for index, row in enumerate(self.rows):
             at = self.first_row + index
-            ws.row_dimensions[at].height = style.ROW_HEIGHT_TASK
+            ws.row_dimensions[at].height = self.row_pt.get(at, style.ROW_HEIGHT_TASK)
             self._format_row(ws, at, row)
+            # 長い文字は、列の中で折り返して全部見せる (行の高さは上で広げてある)
+            for _key, (letter, _weight) in self.WRAP_COLUMNS.items():
+                ws[f"{letter}{at}"].alignment = style.ALIGN_WRAP
             for col in self.timeline.columns:
                 cell = ws.cell(row=at, column=first + col.index)
                 rest = self.timeline.is_rest_column(col)
@@ -587,7 +667,7 @@ class _Writer:
                 return 6.0
             if row in (ROW_BAND, ROW_HEADER) or row == ROW_HEADER + 1:
                 return style.ROW_HEIGHT_HEADER
-            return style.ROW_HEIGHT_TASK
+            return self.row_pt.get(row, style.ROW_HEIGHT_TASK)
 
         return Geometry(col_px, row_pt)
 

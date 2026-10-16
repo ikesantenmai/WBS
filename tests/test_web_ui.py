@@ -420,7 +420,7 @@ def test_the_indent_in_a_task_name_is_shown(page, make_filled):
     assert lefts[0] == lefts[1]              # セル自体は同じ位置
     assert page.eval_on_selector(
         "table.wbs tbody td.name",
-        "n => getComputedStyle(n).whiteSpace") == "pre"
+        "n => getComputedStyle(n).whiteSpace") == "pre-wrap"      # 字下げを残して折り返す
     assert page.errors == []
 
 
@@ -776,3 +776,38 @@ def test_the_desktop_keeps_every_column(page, filled_book):
         "table.wbs thead tr:nth-child(2) th", "n => n.length") == 16
     assert page.is_hidden("#columns-field")
     assert page.is_hidden("#pane-tabs")
+
+
+def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled):
+    """長い文字は列の中で折り返し、その行を高くする。表は画面に収まり、
+    ガントチャートの行は表の行と同じ高さでそろう。"""
+    page.set_viewport_size({"width": 1366, "height": 768})      # ノート型パソコン
+    long_name = "基本設計書の作成と社内レビュー、顧客への説明資料の準備および修正対応を含む非常に長い項目名"
+    book = make_filled("long-ui.xlsx", rows=[
+        ("とても長い大項目の名前がここに入ります", "長い中項目の名前も入ります", "1", long_name,
+         D(2026, 4, 1), 10, D(2026, 4, 14), D(2026, 4, 1), 10, D(2026, 4, 14), 1.0, 10, "",
+         "吉田/菊池/長見/本家", "完了"),
+        ("", "", "2", "短い", D(2026, 4, 15), 5, D(2026, 4, 21),
+         None, None, None, 0, 5, "", "吉田", ""),
+    ])
+    page.set_input_files("#import-file", str(book))
+    page.wait_for_function(
+        "() => document.querySelectorAll('svg.chart-body rect[rx=\"2\"]').length > 0")
+
+    info = page.evaluate("""() => {
+        const trs = [...document.querySelectorAll('table.wbs tbody tr')]
+            .map(tr => tr.getBoundingClientRect().height);
+        const cut = [...document.querySelectorAll('table.wbs tbody td')]
+            .filter(td => td.scrollWidth > td.clientWidth + 1
+                       || td.scrollHeight > td.clientHeight + 1).length;
+        return {
+            rows: trs, cut,
+            chart: document.querySelector('svg.chart-body').getBoundingClientRect().height,
+            tableRight: document.querySelector('.table-wrap').getBoundingClientRect().right,
+        };
+    }""")
+    assert info["cut"] == 0                                   # 切れている文字が無い
+    assert info["rows"][0] > 3 * info["rows"][1]              # 長い行は折り返して高い
+    assert abs(info["chart"] - sum(info["rows"])) < 1         # 日程表の行も同じ高さ
+    assert info["tableRight"] <= 1366                         # 表は画面に収まる
+    assert page.errors == []

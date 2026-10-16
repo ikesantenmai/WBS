@@ -168,6 +168,8 @@ ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 ALIGN_LEFT = Alignment(horizontal="left", vertical="center")
 ALIGN_RIGHT = Alignment(horizontal="right", vertical="center")
 ALIGN_NAME = Alignment(horizontal="left", vertical="center", shrink_to_fit=True)
+#: 長い文字を、列の中で折り返して行を高くする (読み込んだ WBS の行)
+ALIGN_WRAP = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 
 def shade(color: str, factor: float) -> str:

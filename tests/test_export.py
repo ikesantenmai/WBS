@@ -218,15 +218,15 @@ def test_export_draws_a_dashed_bar_for_a_running_task(make_filled, tmp_path):
     assert 'prstDash' not in finished[0]
 
 
-def test_long_text_widens_its_column_in_the_export(make_filled, tmp_path):
-    """長い項目名・大項目・担当は、列を広げて全部見えるようにする (狭めはしない)。"""
+def test_long_text_is_wrapped_and_the_row_is_made_taller(make_filled, tmp_path):
+    """長い文字は、上限のある列の中で折り返し、その行の高さを広げる。"""
     import datetime as dt
 
     import openpyxl
 
     from wbsgen import style
     from wbsgen.importer import read
-    from wbsgen.workbook import export
+    from wbsgen.workbook import TABLE_BUDGET_PX, export
 
     long_name = "基本設計書の作成と社内レビュー、顧客への説明資料の準備を含む非常に長い項目名" * 2
     rows = [("とても長い大項目の名前がここに入ります", "", "1", long_name,
@@ -237,10 +237,39 @@ def test_long_text_widens_its_column_in_the_export(make_filled, tmp_path):
     out = export(read(make_filled(rows=rows)), tmp_path / "out.xlsx")
     sheet = openpyxl.load_workbook(out)["スケジュール"]
     px = lambda letter: style.width_to_px(sheet.column_dimensions[letter].width)
-    assert px(style.COL_NAME) > style.COLUMN_WIDTHS_PX[style.COL_NAME] * 2
-    assert px(style.COL_GROUP) > style.COLUMN_WIDTHS_PX[style.COL_GROUP]
-    assert px(style.COL_MEMBER) > style.COLUMN_WIDTHS_PX[style.COL_MEMBER]
-    assert px(style.COL_START) == style.COLUMN_WIDTHS_PX[style.COL_START]   # 日付は広げない
+    table = sum(px(letter) for letter in "BCDEFGHIJKLMNOQR")
+    assert px(style.COL_NAME) > style.COLUMN_WIDTHS_PX[style.COL_NAME]   # 広げる
+    assert table <= max(TABLE_BUDGET_PX, sum(style.COLUMN_WIDTHS_PX.values()))  # 上限は守る
+
+    first, second = 5, 6                                   # 週表示の最初の記入行
+    assert sheet.row_dimensions[first].height > 3 * style.ROW_HEIGHT_TASK   # 折り返して高い
+    assert sheet.row_dimensions[second].height == style.ROW_HEIGHT_TASK      # 短い行はそのまま
+    for letter in (style.COL_NAME, style.COL_GROUP, style.COL_MEMBER):
+        assert sheet[f"{letter}{first}"].alignment.wrap_text is True
+    assert px(style.COL_START) == style.COLUMN_WIDTHS_PX[style.COL_START]    # 日付は広げない
+
+
+def test_the_gantt_bars_follow_the_taller_rows(make_filled, tmp_path):
+    """行が高くなっても、バーは自分の行のセルに載る (図形はセル基準で置く)。"""
+    import datetime as dt
+    import zipfile
+
+    from wbsgen.importer import read
+    from wbsgen.workbook import export
+
+    rows = [("長い" * 30, "", "1", "長い項目名" * 20, dt.date(2026, 4, 1), 5,
+             dt.date(2026, 4, 7), None, None, None, None, None, "", "吉田", ""),
+            ("", "", "2", "短い", dt.date(2026, 4, 8), 3, dt.date(2026, 4, 10),
+             None, None, None, None, None, "", "吉田", "")]
+    out = export(read(make_filled(rows=rows)), tmp_path / "out.xlsx")
+    with zipfile.ZipFile(out) as zf:
+        drawing = zf.read("xl/drawings/drawing1.xml").decode()
+    rows_of = {}
+    for part in drawing.split("<xdr:twoCellAnchor")[1:]:
+        for no in ("1", "2"):
+            if f'name="plan-{no} ' in part:
+                rows_of[no] = int(part.split("<xdr:row>")[1].split("</xdr:row>")[0])
+    assert rows_of == {"1": 4, "2": 5}          # 5 行目と 6 行目 (0 始まり)
 
 
 def test_short_text_keeps_the_default_widths(exported):
