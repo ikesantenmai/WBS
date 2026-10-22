@@ -23,7 +23,7 @@ from .. import __version__, convert, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
 from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
-from ..importer import apply_edits, assign_numbers, read as read_workbook
+from ..importer import apply_edits, number_edits, read as read_workbook
 from ..timeline import VALID_UNITS, Timeline
 from ..workcal import WEEKDAY_JP, WEEKDAY_KEYS
 
@@ -296,27 +296,19 @@ async def number_workbook(
     file: UploadFile = File(...),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
     edits: Optional[str] = Form(None, description="画面で書き換えた値 (JSON)"),
-) -> Response:
-    """項番が空の行に連番を振った Excel を返す。ほかの中身は変えない。"""
+) -> Dict[str, Any]:
+    """項番が空の行に振る連番を、画面の編集として返す。
+
+    ファイルは書き換えない (書き戻すと、数式の計算結果やマクロを失うため)。
+    画面はこの編集を重ねて読み込み直し、書き出しにも反映する。
+    """
     language = normalize(lang)
     imported = await _read_upload(file, None, language, edits)
-    await file.seek(0)
     try:
-        # 旧形式は、直した .xlsx に項番を書き込んで、.xls に戻す
-        source = imported.converted or await file.read()
-        data, count = assign_numbers(io.BytesIO(source), language,
-                                     _parse_edits(edits, language), imported.macro)
-        data = _finish(imported, data, language)
+        numbered, count = number_edits(imported, _parse_edits(edits, language), language)
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    return Response(
-        content=data,
-        media_type=_kind(imported)[1],
-        headers={
-            "Content-Disposition": _disposition(imported, _number_suffix(imported.spec)),
-            "X-Numbered-Rows": str(count),
-        },
-    )
+    return {"edits": numbered, "count": count}
 
 
 def _finish(imported, data: bytes, language: str) -> bytes:
@@ -328,10 +320,6 @@ def _finish(imported, data: bytes, language: str) -> bytes:
     except convert.ConvertError as exc:
         raise HTTPException(status_code=422,
                             detail=message(language, "xls_failed", reason=exc))
-
-
-def _number_suffix(spec: BlankWBS) -> str:
-    return "_項番" if spec.language == "ja" else "_numbered"
 
 
 @app.middleware("http")

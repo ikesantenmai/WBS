@@ -472,10 +472,20 @@ def test_number_fills_only_the_empty_numbers(client, make_filled):
     with open(path, "rb") as handle:
         response = client.post("/api/number", files={"file": ("filled.xlsx", handle.read(), "x")})
     assert response.status_code == 200
-    assert response.headers["x-numbered-rows"] == "2"
-    ws = openpyxl.load_workbook(io.BytesIO(response.content))["スケジュール"]
-    assert [ws[f"D{r}"].value for r in range(5, 10)] == ["101", 1, "201", 2, "301"]
-    assert ws["E5"].value == "要件定義"
+    body = response.json()
+    assert body["count"] == 2
+    # ファイルは書き換えず、振った項番を「編集」として返す (行番号 -> 項番)
+    assert body["edits"] == {"6": {"no": "1"}, "8": {"no": "2"}}
+
+    # その編集を重ねて読み込むと、項番が入り、ほかの中身は変わらない
+    import json
+
+    with open(path, "rb") as handle:
+        again = client.post("/api/import", files={"file": ("filled.xlsx", handle.read(), "x")},
+                            data={"edits": json.dumps(body["edits"])})
+    rows = again.json()["rows"]
+    assert [r["no"] for r in rows] == ["101", "1", "201", "2", "301"]
+    assert rows[0]["name"] == "要件定義"
 
 
 # ---------------------------------------------------------------- edits
@@ -611,11 +621,11 @@ def test_export_of_an_xlsm_stays_xlsm_with_its_macros(client, macro_book):
         assert "xl/drawings/drawing1.xml" in zf.namelist()      # ガントも付く
 
 
-def test_numbering_keeps_the_macros_of_an_xlsm(client, macro_book):
+def test_numbering_an_xlsm_does_not_touch_its_macros(client, macro_book):
+    """項番はファイルを書き換えずに編集で返すので、マクロはそのまま。"""
     response = _upload_xlsm(client, macro_book, "/api/number")
     assert response.status_code == 200
-    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-        assert zf.read("xl/vbaProject.bin") == VBA
+    assert response.json()["count"] == 0          # 既定の中身は、項番がすべて入っている
 
 
 def test_export_of_an_xlsx_stays_xlsx(client, filled_book):
@@ -655,10 +665,10 @@ def test_an_xls_is_read_and_exported_as_xls(client, xls_book):
 
 
 @needs_office
-def test_numbering_an_xls_returns_an_xls(client, xls_book):
+def test_numbering_an_xls_returns_edits(client, xls_book):
     response = client.post("/api/number", files={"file": ("f.xls", xls_book, "x")})
     assert response.status_code == 200
-    assert response.content[:4] == XLS_MAGIC
+    assert response.json()["edits"] == {}
 
 
 def test_an_xls_without_libreoffice_is_explained(client, monkeypatch):

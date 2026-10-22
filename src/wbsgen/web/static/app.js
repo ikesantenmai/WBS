@@ -2252,7 +2252,10 @@ function withYear(row, key, text) {
 
 /**
  * 項番が空の行に連番を振り、画面に反映する (ダウンロードはしない)。
- * 振った本を読み込み直すので、このあとの書き出しにも項番が入る。
+ *
+ * ファイルは書き換えず、振った項番を「書き換え」として重ねて読み込み直す。
+ * ファイルを書き戻すと、数式の計算結果やマクロを失うため。このあとの書き出しにも
+ * 項番が入る。
  */
 async function numberRows() {
   if (!loaded) return;
@@ -2262,11 +2265,10 @@ async function numberRows() {
   appendEdits(body, loaded.edits);
   button.disabled = true;
   startBusy('busy_number');
-  let count;
+  let result;
   try {
     const response = await api(`/api/number?lang=${language}`, { method: 'POST', body });
-    count = response.headers.get('X-Numbered-Rows');
-    loaded = { name: loaded.name, bytes: await response.arrayBuffer(), edits: loaded.edits };
+    result = await response.json();
   } catch (error) {
     banner(t('cannot_save', { reason: error.message }));
     return;
@@ -2274,8 +2276,9 @@ async function numberRows() {
     button.disabled = false;
     endBusy();
   }
-  await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value, false, loaded.edits);
-  banner(t('numbered', { n: count }), true);
+  const edits = mergeEdits(loaded.edits, result.edits);
+  const done = await importBytes(loaded.name, loaded.bytes, $('#chart-unit').value, false, edits);
+  if (done) banner(t('numbered', { n: result.count }), true);
 }
 
 /**

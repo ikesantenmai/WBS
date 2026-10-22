@@ -137,6 +137,9 @@ class Row:
     derived: set = field(default_factory=set)
     #: セルに書かれていた値。導出をやり直せるように控えておく。
     written: dict = field(default_factory=dict)
+    #: セルに数式が入っていた項目 (属性名 -> ``=F5+13`` のような数式)。
+    #: 書き出しでは、この数式をそのまま残す。
+    formulas: Dict[str, str] = field(default_factory=dict)
 
     @property
     def has_plan(self) -> bool:
@@ -174,6 +177,10 @@ class ImportedWBS:
     source: Optional[bytes] = None
     #: マクロ有効の形式 (.xlsm、またはマクロ入り) か。書き出しも同じ形式にする。
     macro: bool = False
+    #: 日程表のシート名と、項目 (属性名) ごとの列番号 (1 始まり)。数式の参照を
+    #: 書き出し先の位置に直すために使う。
+    sheet_title: str = ""
+    columns: Dict[str, int] = field(default_factory=dict)
     #: 旧形式 (.xls) で読み込んだか。書き出しも .xls に戻す。
     legacy: bool = False
     #: .xls を .xlsx に直した中身 (旧形式のときだけ)。以降の処理はこれを読む。
@@ -211,7 +218,9 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     title = _read_title(sheet, header_row) or spec.title
     spec.title = title
     macro = _is_macro(source, filename)
+    _attach_formulas(source, sheet.title, columns, rows)
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
+                       sheet_title=sheet.title, columns=dict(columns),
                        # マクロ入りは、書き出しでマクロごと引き継ぐので常に控える
                        source=_source_bytes(source) if (macro or _has_extra(book)) else None,
                        macro=macro)
@@ -265,6 +274,7 @@ def apply_edits(imported: ImportedWBS, edits, language: str = DEFAULT_LANGUAGE,
                     column=text.columns.get(key, key), reason=_reason(exc, lang)))
                 continue
             setattr(row, key, value)
+            row.formulas.pop(key, None)        # 書き換えたセルの数式は、書き換えで置き換わる
             if key in WRITTEN_FIELDS:
                 row.written[key] = value
         if "days" in fields and "end" not in fields:
@@ -277,48 +287,31 @@ def apply_edits(imported: ImportedWBS, edits, language: str = DEFAULT_LANGUAGE,
     return imported
 
 
-def assign_numbers(source, language: str = DEFAULT_LANGUAGE, edits=None,
-                   macro: bool = False):
-    """項番が空の行に、上から順に連番を書き込んだ本を返す。
+def number_edits(imported: "ImportedWBS", edits=None,
+                 language: str = DEFAULT_LANGUAGE):
+    """項番が空の行に、上から順に連番を振る。``(編集の辞書, 振った件数)`` を返す。
 
-    ``(xlsx のバイト列, 振った件数)`` を返す。すでに書かれている項番は
-    変えず、その番号も使わない (先行の欄が指している番号を動かさないため)。
-    項目名の無い行 (まとめ行など) には振らない。
-    ``edits`` (画面で書き換え中の値) は、項番の判断にだけ使う。項番を書き
-    換えた行には振らない。
+    ファイルは書き換えず、画面の編集 (``{行番号: {"no": 文字}}``) として返す。
+    ファイルを書き戻すと、数式の計算結果やマクロが失われかねないため。
+
+    すでに書かれている項番は変えず、その番号も使わない (先行の欄が指している
+    番号を動かさないため)。項目名の無い行 (まとめ行など) には振らない。
+    ``edits`` で項番を書き換えた行にも振らない。
     """
     lang = normalize(language)
-    raw = _source_bytes(source)
-    if raw is None:
-        raise SpecError(message(lang, "not_excel", reason="unreadable"))
-    imported = apply_edits(read(io.BytesIO(raw), language=lang), edits, lang)
-    try:
-        # 書き戻すので、計算結果ではなく数式を読む
-        # マクロ入りは、書き戻してもマクロが残るように keep_vba で読む
-        book = load_workbook(io.BytesIO(raw), data_only=False, keep_vba=macro)
-    except Exception as exc:  # noqa: BLE001
-        raise SpecError(message(lang, "not_excel", reason=exc))
-    sheet, _header_row, columns = _pick_plan_sheet(book, lang)
-    if "no" not in columns:
+    if "no" not in imported.columns:
         raise SpecError(message(lang, "no_number_column"))
-
     used = {row.no for row in imported.rows if row.no}
-    count, number = 0, 0
+    out: Dict[str, Dict[str, str]] = {}
+    number = 0
     for row in imported.rows:
         if row.no or not row.name.strip() or "no" in (edits or {}).get(str(row.row), {}):
             continue
         number += 1
         while str(number) in used:
             number += 1
-        cell = sheet.cell(row=row.row, column=columns["no"])
-        if type(cell).__name__ == "MergedCell":
-            continue
-        cell.value = number
-        count += 1
-
-    out = io.BytesIO()
-    book.save(out)
-    return out.getvalue(), count
+        out[str(row.row)] = {"no": str(number)}
+    return out, len(out)
 
 
 #: 導出のたびに書かれた値へ戻す項目
@@ -519,6 +512,36 @@ def _formula_warnings(source, sheet_name: str, columns: Dict[str, int],
                 if len(out) >= MAX_FORMULA_WARNINGS:
                     return out
     return out
+
+
+def _attach_formulas(source, sheet_name: str, columns: Dict[str, int],
+                     rows: List[Row]) -> None:
+    """セルに数式が入っている項目を、行に控える (書き出しで数式を残すため)。
+
+    計算結果ではなく数式を読むので、シートをもう一度開く。読めなければ何もしない
+    (数式を残せないだけで、読み込みは続ける)。
+    """
+    if not rows or not columns:
+        return
+    formulas = _formula_sheet(source, sheet_name)
+    if formulas is None:
+        return
+    wanted = {row.row: row for row in rows}
+    first, last = min(wanted), max(wanted)
+    try:
+        stream = formulas.iter_rows(min_row=first, max_row=last, min_col=1,
+                                    max_col=max(columns.values()), values_only=True)
+        for offset, values in enumerate(stream):
+            row = wanted.get(first + offset)
+            if row is None:
+                continue
+            for key, col in columns.items():
+                value = values[col - 1] if col - 1 < len(values) else None
+                if isinstance(value, str) and value.startswith("=") and len(value) > 1:
+                    row.formulas[key] = value
+    except Exception:  # noqa: BLE001 - 数式を控えられなくても読み込みは続ける
+        for row in rows:
+            row.formulas.clear()
 
 
 def _formula_sheet(source, sheet_name: str):

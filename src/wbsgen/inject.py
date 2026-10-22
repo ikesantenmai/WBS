@@ -5,11 +5,14 @@ openpyxl が書き出した zip を読み直し、指定シートに図形パー
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import shutil
 import zipfile
 from pathlib import Path
+from typing import Any, Dict
 from xml.etree import ElementTree
+from xml.sax.saxutils import escape
 
 NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -149,3 +152,59 @@ def _add_drawing_ref(data: bytes, rel_id: str) -> bytes:
         if pos != -1:
             return (xml[:pos] + tag + xml[pos:]).encode("utf-8")
     return xml.replace("</worksheet>", tag + "</worksheet>").encode("utf-8")
+
+
+# ----------------------------------------------------------------------
+EXCEL_EPOCH = _dt.date(1899, 12, 30)
+
+
+def inject_cached_values(path: Path, sheet_part: str, values: Dict[str, Any]) -> None:
+    """数式のセルに、計算済みの値 (キャッシュ) を書き足す。
+
+    openpyxl は数式しか書かないので、そのままでは、数式を計算し直さない読み手
+    (このツールの読み込みを含む) からは、数式のセルが空に見える。値は
+    ``{"E5": 値}`` で渡す。日付は Excel のシリアル値、文字は文字列として入れる。
+    """
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with zipfile.ZipFile(path) as zin:
+        names = zin.namelist()
+        contents = {n: zin.read(n) for n in names}
+
+    xml = contents[sheet_part].decode("utf-8")
+    for ref, value in values.items():
+        cached = _cached_value(value)
+        if cached is None:
+            continue
+        kind, text = cached
+        pattern = re.compile(
+            r'(<c r="%s"(?: [^>]*?)?)>(<f>.*?</f>)<v\s*/>|(<c r="%s"(?: [^>]*?)?)>(<f>.*?</f>)<v></v>'
+            % (ref, ref), re.S)
+
+        def put(match, kind=kind, text=text):
+            head = match.group(1) or match.group(3)
+            formula = match.group(2) or match.group(4)
+            return f"{head}{kind}>{formula}<v>{escape(text)}</v>"
+
+        xml = pattern.sub(put, xml, count=1)
+    contents[sheet_part] = xml.encode("utf-8")
+
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in contents.items():
+            zout.writestr(name, data)
+    shutil.move(str(tmp), str(path))
+
+
+def _cached_value(value):
+    """``(セルの型の属性, 値の文字)``。入れられない値は ``None``。"""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return ' t="b"', "1" if value else "0"
+    if isinstance(value, _dt.datetime):
+        value = value.date()
+    if isinstance(value, _dt.date):
+        return "", str((value - EXCEL_EPOCH).days)
+    if isinstance(value, (int, float)):
+        return "", repr(value)
+    return ' t="str"', str(value)

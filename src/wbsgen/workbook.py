@@ -25,7 +25,7 @@ from typing import Dict, List, Optional
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import style
@@ -34,8 +34,8 @@ from .daily import Digest, build as build_daily
 from .chart import running_end
 from .drawing import Drawing, Geometry, Shape
 from .i18n import Labels, labels as get_labels, status_kind
-from . import netdraw
-from .inject import inject_drawing, sheet_part
+from . import formulas, netdraw
+from .inject import inject_cached_values, inject_drawing, sheet_part
 from .timeline import UNIT_DAY, Timeline
 from .workload import WorkloadMonth, build as build_workload
 
@@ -145,6 +145,7 @@ def export(imported, path, base_date=None) -> Path:
     resolve(imported.rows, spec.calendar(), day, spec.language)
     writer = _Writer(spec, rows=imported.rows, base_date=day)
     writer.keep_vba = imported.macro
+    writer.set_formulas(imported)
     writer.workload = build_workload(imported.rows, spec.calendar())
     writer.daily = build_daily(imported.rows, spec.calendar(), day)
     writer.network = _precedence(imported.rows)
@@ -225,6 +226,10 @@ class _Writer:
         self.network = None
         #: マクロ有効の本として書き出すか (元のマクロを引き継ぐ)
         self.keep_vba = False
+        #: 元のセルに入っていた数式 ((記入行の位置, 項目名) -> 数式)。そのまま残して書く。
+        self.formulas: Dict[tuple, str] = {}
+        #: 数式のセルに添える計算済みの値 (セル番地 -> 値)
+        self.cached: Dict[str, object] = {}
         self._code_names = {}
         #: 項番が空で、図に載せなかった行の数
         self.network_skipped = 0
@@ -264,7 +269,11 @@ class _Writer:
                 ws.sheet_properties.codeName = self._code_names[title]
             write_sheet(ws)
             plan = plan or ws
+        # 数式は、開いたときに Excel が計算し直す
+        workbook.calculation.fullCalcOnLoad = True
         workbook.save(path)
+        if self.cached:
+            inject_cached_values(path, sheet_part(path, plan.title), self.cached)
 
         drawing = self._gantt()
         if len(drawing):
@@ -350,6 +359,26 @@ class _Writer:
         if value == "days":
             return self.labels.days_format
         return value
+
+    def set_formulas(self, imported) -> None:
+        """元のセルの数式を控える。参照は、書き出し先のセルの位置に直す。
+
+        列や行の位置が変わらなければそのまま、変わるときは参照を書き換える。
+        直せない数式 (書き出さないセルを指すもの) は残さず、値を書く。
+        """
+        letters = {key: letter for key, letter, _group in TABLE_COLUMNS}
+        columns = {col: column_index_from_string(letters[key])
+                   for key, col in imported.columns.items() if key in letters}
+        rows = {row.row: self.first_row + index for index, row in enumerate(self.rows)}
+        moved = formulas.moves(columns, rows)
+        for index, row in enumerate(self.rows):
+            for key, formula in getattr(row, "formulas", {}).items():
+                if key not in letters:
+                    continue
+                text = (formulas.translate(formula, columns, rows, imported.sheet_title)
+                        if moved else formula)
+                if text:
+                    self.formulas[(index, key)] = text
 
     #: 長い文字を折り返す列 (属性名 -> 列文字)。幅を分けるときの重みも添える。
     WRAP_COLUMNS = {
@@ -589,6 +618,13 @@ class _Writer:
             ):
                 if value not in (None, ""):
                     ws[f"{letter}{at}"] = value
+
+            # 元のセルが数式だった項目は、値のかわりに数式を残す
+            for key, letter, _group in TABLE_COLUMNS:
+                formula = self.formulas.get((index, key))
+                if formula:
+                    ws[f"{letter}{at}"] = formula
+                    self.cached[f"{letter}{at}"] = getattr(row, key, None)
 
             if row.status:
                 self._status_style(ws[f"{style.COL_STATUS}{at}"], row.status)
