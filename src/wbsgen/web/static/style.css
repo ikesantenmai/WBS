@@ -274,9 +274,8 @@ table.wbs.load td.free-days {
 
 /* 一覧は表そのものだけを横に流す (左に貼り付けない) */
 .daily .table-wrap { position: static; overflow-x: auto; padding: 0 14px 12px; }
-/* 幅は内容に合わせて広げる (大項目・中項目が途切れないように)。列幅は最小幅として働く */
-table.wbs.daily-list { font-size: 11px; table-layout: auto; width: auto; }
-table.wbs.daily-list td.group, table.wbs.daily-list td.subgroup { overflow: visible; }
+/* 画面幅に収め、長い文字は列の中で折り返す (td.wrap)。行の高さは文字に合わせて広がる */
+table.wbs.daily-list { font-size: 11px; }
 table.wbs.daily-list thead th { background: var(--header); }
 table.wbs.daily-list td.name { padding-left: 6px; }
 

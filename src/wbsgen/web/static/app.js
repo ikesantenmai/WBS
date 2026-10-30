@@ -847,7 +847,8 @@ function dailyBody(rows) {
 }
 
 function dailyTable(rows) {
-  const columns = dailyColumns();
+  // 一覧は日程表を並べないので、画面幅いっぱいまで使い、入りきらない文字は折り返す
+  const columns = layoutColumns(dailyColumns(), rows, window.innerWidth - 70, true);
   const cols = el('colgroup');
   for (const column of columns) {
     cols.append(el('col', { style: `width:${column.width}px` }));
@@ -865,14 +866,15 @@ function dailyTable(rows) {
     body.append(tr);
   }
   const width = columns.reduce((total, c) => total + c.width, 0);
-  return el('table', { class: 'wbs daily-list', style: `min-width:${width}px` },
+  return el('table', { class: 'wbs daily-list', style: `width:${width}px` },
             cols, el('thead', {}, head), body);
 }
 
 /** 一覧の 1 マス。読み込んだ文字色・背景はそのまま見せる。 */
 function dailyCell(row, column) {
   const key = column.key;
-  const td = el('td', { class: column.cls || '' });
+  const wrap = WRAP_KEYS.includes(key) ? ' wrap' : '';
+  const td = el('td', { class: `${column.cls || ''}${wrap}` });
   if (key === 'status') {
     td.append(el('span', {
       class: 'status-chip',
@@ -1403,28 +1405,33 @@ function tableBudget() {
 }
 
 /** セルに出す文字 (編集中ならその文字)。 */
-function cellText(rows, i, key) {
+function cellText(rows, i, key, collapse = true) {
   const row = rows[i];
   const edited = cellEdits[row.row] && cellEdits[row.row][key];
   if (edited !== undefined) return edited;
-  // 大項目・中項目は、変わったところにだけ出す
-  if ((key === 'group' || key === 'subgroup') && i > 0 && rows[i - 1][key] === row[key]) return '';
+  // 大項目・中項目は、変わったところにだけ出す (一覧では毎行出す)
+  if (collapse && (key === 'group' || key === 'subgroup') && i > 0
+      && rows[i - 1][key] === row[key]) return '';
   return displayText(row, key);
 }
 
 /**
- * 列の幅を決める。
+ * 列の幅を決める。``list`` は一覧 (本日の状況など) 用で、大項目・中項目を毎行出し、
+ * 見出しに予定・実績の接頭を付ける。
  *
  * まず、書かれている文字が 1 行に入る幅 (自然な幅) を測る。表がまるごと
  * 画面に収まるならそのまま使う。収まらないときは、日付や日数の列は自然な幅の
  * ままにして、文字の長い列 (大項目・中項目・項目・担当・先行) の幅を縮め、
  * 入りきらない文字は折り返す。短い列には余分な幅を渡さず、残りを重みづけで分ける。
  */
-function layoutColumns(columns, rows) {
+function layoutColumns(columns, rows, budget = tableBudget(), list = false) {
   const natural = columns.map((column) => {
-    let need = measureText(t('columns')[column.key]);
+    // 一覧の見出しは「予定 開始日」のように、予定・実績の接頭が付く
+    const prefix = list && column.group
+      ? `${t(column.group === 'plan' ? 'group_plan' : 'group_actual')} ` : '';
+    let need = measureText(prefix + t('columns')[column.key]);
     rows.forEach((row, i) => {
-      let w = measureText(cellText(rows, i, column.key));
+      let w = measureText(cellText(rows, i, column.key, !list));
       if (column.key === 'status') w += 16;       // 状態の札の余白
       need = Math.max(need, w);
     });
@@ -1433,7 +1440,7 @@ function layoutColumns(columns, rows) {
   const widths = natural.slice();
 
   let open = columns.map((c, i) => i).filter((i) => WRAP_KEYS.includes(columns[i].key));
-  let room = tableBudget() - columns.reduce(
+  let room = budget - columns.reduce(
     (n, c, i) => n + (open.includes(i) ? 0 : natural[i]), 0);
   const weight = (i) => WRAP_WEIGHT[columns[i].key] || 1;
   // 自然な幅が分け前より小さい列は、その幅で確定し、残りで分け直す

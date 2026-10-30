@@ -813,3 +813,53 @@ def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled):
     assert abs(info["chart"] - sum(info["rows"])) < 1         # 日程表の行も同じ高さ
     assert info["tableRight"] <= 1366                         # 表は画面に収まる
     assert page.errors == []
+
+
+def test_long_text_wraps_in_todays_status_and_the_owner_view(page, make_filled):
+    """本日の状況の一覧と、担当者別の表も、長い文字は折り返して行を高くする。"""
+    page.set_viewport_size({"width": 1366, "height": 768})
+    long_name = "基本設計書の作成と社内レビュー、顧客への説明資料の準備および修正対応を含む非常に長い項目名です"
+    book = make_filled("long-views.xlsx", rows=[
+        ("とても長い大項目の名前がここに入ります", "長い中項目の名前も入ります", "1", long_name,
+         D(2026, 4, 1), 10, D(2026, 4, 14), D(2026, 4, 1), 10, None, 0.3, 10, "",
+         "吉田/菊池", "実行中"),
+        ("短", "短", "2", "短い", D(2026, 5, 8), 5, D(2026, 5, 14),
+         None, None, None, 0, 5, "", "吉田", ""),
+    ])
+    page.set_input_files("#import-file", str(book))
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('table.wbs tbody td.name')]"
+        ".some(td => td.textContent.startsWith('基本設計書'))")
+
+    probe = """(selector) => {
+        const table = [...document.querySelectorAll(selector)].find(t => t.offsetParent);
+        const wrap = table.parentElement;
+        return {
+            cut: [...table.querySelectorAll('tbody td')].filter(td =>
+                td.scrollWidth > td.clientWidth + 1 || td.scrollHeight > td.clientHeight + 1).length,
+            head: [...table.querySelectorAll('thead th')].filter(h =>
+                h.scrollWidth > h.clientWidth + 1).length,
+            rows: [...table.querySelectorAll('tbody tr')].map(tr => tr.getBoundingClientRect().height),
+            sideways: wrap.scrollWidth > wrap.clientWidth + 1,
+        };
+    }"""
+    try:
+        # 本日の状況: 遅延タスクの一覧
+        page.select_option("#view", "daily")
+        page.wait_for_selector("table.daily-list")
+        daily = page.evaluate(probe, "table.daily-list")
+        assert daily["cut"] == 0 and daily["head"] == 0          # 切れている文字が無い
+        assert daily["rows"][0] > 2 * daily["rows"][1]           # 長い行は折り返して高い
+        assert not daily["sideways"]                             # 横に流れない
+
+        # 担当者別: 担当者を選ぶと、その人たちの表が出る
+        page.select_option("#view", "member")
+        page.locator(".member-chip").nth(0).click()
+        page.locator(".member-chip").nth(1).click()
+        page.wait_for_selector("table.wbs tbody tr")
+        member = page.evaluate(probe, "table.wbs")
+        assert member["cut"] == 0
+        assert member["rows"][0] > 2 * member["rows"][1]
+        assert page.errors == []
+    finally:
+        page.select_option("#view", "chart")        # ほかのテストのために、元の表示へ戻す
