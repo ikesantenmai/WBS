@@ -136,8 +136,9 @@ def test_preview_rejects_bad_input(client, payload, message):
 def test_build_returns_a_real_workbook(client):
     response = client.post("/api/build", json={**SPEC, "members": ["設計"]})
     assert response.status_code == 200
+    # 同梱のマクロを組み込むので、マクロ有効の形式で返る
     assert response.headers["content-type"].startswith(
-        "application/vnd.openxmlformats-officedocument.spreadsheetml")
+        "application/vnd.ms-excel.sheet.macroEnabled")
 
     book = openpyxl.load_workbook(io.BytesIO(response.content))
     assert book.sheetnames == ["スケジュール", "担当者一覧", "設定"]
@@ -339,7 +340,7 @@ def test_export_returns_a_workbook_with_the_chart(client, filled_book):
         response = client.post("/api/export", files={"file": ("filled.xlsx", handle.read(), "x")})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith(
-        "application/vnd.openxmlformats-officedocument.spreadsheetml")
+        "application/vnd.ms-excel.sheet.macroEnabled")
 
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
         assert "xl/drawings/drawing1.xml" in zf.namelist()   # ガントの図形
@@ -628,12 +629,117 @@ def test_numbering_an_xlsm_does_not_touch_its_macros(client, macro_book):
     assert response.json()["count"] == 0          # 既定の中身は、項番がすべて入っている
 
 
-def test_export_of_an_xlsx_stays_xlsx(client, filled_book):
+# ---------------------------------------------------------------- 同梱のマクロ
+def _bundled_vba() -> bytes:
+    from wbsgen import macro
+
+    return macro.MACRO_FILE.read_bytes()
+
+
+def test_export_of_an_xlsx_gets_the_bundled_macro(client, filled_book):
+    """マクロの無いファイルを書き出すと、同梱のマクロ (添付の UpdateWBS) が付く。"""
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("f.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    assert ".xlsm" in response.headers["content-disposition"]
+    assert response.headers["content-type"].startswith(
+        "application/vnd.ms-excel.sheet.macroEnabled")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == _bundled_vba()      # 添付のマクロそのまま
+        types = zf.read("[Content_Types].xml")
+        assert b"macroEnabled.main+xml" in types and b'Extension="bin"' in types
+        assert b"vbaProject" in zf.read("xl/_rels/workbook.xml.rels")
+        assert b'codeName="ThisWorkbook"' in zf.read("xl/workbook.xml")
+        assert "xl/drawings/drawing1.xml" in zf.namelist()          # ガントも付く
+
+
+def test_the_blank_workbook_gets_the_bundled_macro_too(client):
+    response = client.post("/api/build", json={**SPEC, "members": ["設計"]})
+    assert ".xlsm" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == _bundled_vba()
+    # マクロ入りでも、ブックとして読める
+    assert openpyxl.load_workbook(io.BytesIO(response.content)).sheetnames[0] == "スケジュール"
+
+
+def test_the_format_can_be_chosen_per_download(client, filled_book):
+    """macro=0 ならマクロなしの .xlsx、macro=1 ならマクロ有効の .xlsm。"""
+    blank = {"0": client.post("/api/build?macro=0", json={**SPEC}),
+             "1": client.post("/api/build?macro=1", json={**SPEC})}
+    assert ".xlsx" in blank["0"].headers["content-disposition"]
+    assert ".xlsm" in blank["1"].headers["content-disposition"]
+
+    def export(flag):
+        with open(filled_book, "rb") as handle:
+            return client.post(f"/api/export?macro={flag}",
+                               files={"file": ("f.xlsx", handle.read(), "x")})
+
+    off, on = export(0), export(1)
+    assert ".xlsx" in off.headers["content-disposition"]
+    assert off.headers["content-type"].startswith("application/vnd.openxmlformats")
+    with zipfile.ZipFile(io.BytesIO(off.content)) as zf:
+        assert "xl/vbaProject.bin" not in zf.namelist()
+        assert "xl/drawings/drawing1.xml" in zf.namelist()          # ガントは付く
+    assert ".xlsm" in on.headers["content-disposition"]
+
+
+def test_choosing_no_macros_drops_the_macros_of_the_file_too(client, macro_book):
+    """マクロなしを選んだら、読み込んだファイルのマクロも付けない (.xlsx で返る)。"""
+    response = _upload_xlsm(client, macro_book, "/api/export?macro=0")
+    assert ".xlsx" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert "xl/vbaProject.bin" not in zf.namelist()
+        assert b"macroEnabled" not in zf.read("[Content_Types].xml")
+    # 有効を選べば、自分のマクロを引き継ぐ
+    kept = _upload_xlsm(client, macro_book, "/api/export?macro=1")
+    with zipfile.ZipFile(io.BytesIO(kept.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == VBA
+
+
+def test_the_macro_can_be_turned_off(client, filled_book, monkeypatch):
+    monkeypatch.setenv("WBSGEN_MACRO", "off")
     with open(filled_book, "rb") as handle:
         response = client.post("/api/export", files={"file": ("f.xlsx", handle.read(), "x")})
     assert ".xlsx" in response.headers["content-disposition"]
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
         assert "xl/vbaProject.bin" not in zf.namelist()
+    blank = client.post("/api/build", json={**SPEC})
+    assert ".xlsx" in blank.headers["content-disposition"]
+
+
+def test_the_macro_is_only_for_japanese_workbooks(client):
+    """マクロは日本語のシート名 (「スケジュール」「設定」) を前提にしている。"""
+    response = client.post("/api/build?lang=en", json={**SPEC})
+    assert ".xlsx" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert "xl/vbaProject.bin" not in zf.namelist()
+
+
+def test_a_file_with_its_own_macro_keeps_it(client, macro_book):
+    """読み込んだファイルにマクロがあれば、それを引き継ぐ (同梱のマクロで置き換えない)。"""
+    response = _upload_xlsm(client, macro_book, "/api/export")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == VBA              # 自分のマクロ
+        assert zf.read("xl/vbaProject.bin") != _bundled_vba()
+
+
+def test_an_xlsm_without_macros_gets_the_bundled_one(client, filled_book):
+    """.xlsm でもマクロが入っていないファイルには、同梱のマクロを付ける。"""
+    from wbsgen.importer import read
+
+    assert read(filled_book).has_vba is False
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export", files={"file": ("plain.xlsm", handle.read(), "x")})
+    assert ".xlsm" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert zf.read("xl/vbaProject.bin") == _bundled_vba()
+
+
+def test_an_exported_xlsm_can_be_imported_again(client, filled_book):
+    with open(filled_book, "rb") as handle:
+        exported = client.post("/api/export", files={"file": ("f.xlsx", handle.read(), "x")})
+    again = client.post("/api/import", files={"file": ("out.xlsm", exported.content, "x")})
+    assert again.status_code == 200 and len(again.json()["rows"]) == 5
 
 
 # ---------------------------------------------------------------- xls

@@ -181,6 +181,9 @@ class ImportedWBS:
     #: 書き出し先の位置に直すために使う。
     sheet_title: str = ""
     columns: Dict[str, int] = field(default_factory=dict)
+    #: 読み込んだファイルに、マクロ (VBA) が入っていたか。無ければ、書き出しで
+    #: 同梱のマクロを組み込める。
+    has_vba: bool = False
     #: 旧形式 (.xls) で読み込んだか。書き出しも .xls に戻す。
     legacy: bool = False
     #: .xls を .xlsx に直した中身 (旧形式のときだけ)。以降の処理はこれを読む。
@@ -221,6 +224,7 @@ def read(source, filename: str = "", language: str = DEFAULT_LANGUAGE,
     _attach_formulas(source, sheet.title, columns, rows)
     return ImportedWBS(title=title, spec=spec, rows=rows, warnings=warnings,
                        sheet_title=sheet.title, columns=dict(columns),
+                       has_vba=_has_vba(source),
                        # マクロ入りは、書き出しでマクロごと引き継ぐので常に控える
                        source=_source_bytes(source) if (macro or _has_extra(book)) else None,
                        macro=macro)
@@ -595,11 +599,8 @@ MACRO_SUFFIX = ".xlsm"
 VBA_PART = "xl/vbaProject.bin"
 
 
-def _is_macro(source, filename: str = "") -> bool:
-    """マクロ有効の形式か。拡張子が .xlsm、またはマクロの部品が入っていれば真。"""
-    name = filename or (str(source) if isinstance(source, (str, Path)) else "")
-    if name.lower().endswith(MACRO_SUFFIX):
-        return True
+def _has_vba(source) -> bool:
+    """ファイルにマクロの部品 (vbaProject.bin) が入っているか。"""
     raw = _source_bytes(source)
     if not raw:
         return False
@@ -608,6 +609,14 @@ def _is_macro(source, filename: str = "") -> bool:
             return VBA_PART in archive.namelist()
     except zipfile.BadZipFile:
         return False
+
+
+def _is_macro(source, filename: str = "") -> bool:
+    """マクロ有効の形式か。拡張子が .xlsm、またはマクロの部品が入っていれば真。"""
+    name = filename or (str(source) if isinstance(source, (str, Path)) else "")
+    if name.lower().endswith(MACRO_SUFFIX):
+        return True
+    return _has_vba(source)
 
 
 def _source_bytes(source) -> Optional[bytes]:

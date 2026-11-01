@@ -19,7 +19,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .. import __version__, convert, workbook
+from .. import __version__, convert, macro, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
 from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
@@ -139,21 +139,30 @@ def _weekday(timeline, spec: BlankWBS, col) -> str:
 def build_workbook(
     payload: Dict[str, Any] = Body(...),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+    with_macro: Optional[str] = Query(
+        None, alias="macro", description="1: マクロ有効 (.xlsm) / 0: マクロなし (.xlsx)"),
 ) -> Response:
-    """Excel を生成して返す。"""
+    """Excel を生成して返す。
+
+    ``macro`` が 0 ならマクロなしの .xlsx、1 または省略なら、同梱のマクロ
+    (日本語のときだけ) を組み込んだマクロ有効の .xlsm。
+    """
     language = _language(lang, payload)
     spec = _spec({**payload, "language": language}, language)
+    bundle = None if _flag(with_macro) is False else macro.bundled(spec.language)
+    extension = "xlsm" if bundle else "xlsx"
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "wbs.xlsx"
-        workbook.write(spec, path)
+        path = Path(tmp) / f"wbs.{extension}"
+        workbook.write(spec, path, bundle)
         data = path.read_bytes()
 
     return Response(
         content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=XLSM_TYPE if bundle else XLSX_TYPE,
         headers={
             "Content-Disposition":
-                f"attachment; filename=wbs.xlsx; filename*=UTF-8''{_filename(spec)}",
+                f"attachment; filename=wbs.{extension};"
+                f" filename*=UTF-8''{_filename(spec, '', extension)}",
         },
     )
 
@@ -167,24 +176,45 @@ XLSM_TYPE = "application/vnd.ms-excel.sheet.macroEnabled.12"
 XLS_TYPE = "application/vnd.ms-excel"
 
 
-def _kind(imported) -> tuple:
-    """書き出すファイルの ``(拡張子, メディアタイプ)``。読み込んだ形式と同じにする。"""
-    if imported.legacy:
-        return "xls", XLS_TYPE
-    if imported.macro:
-        return "xlsm", XLSM_TYPE
-    return "xlsx", XLSX_TYPE
+def _flag(value: Optional[str]) -> Optional[bool]:
+    """``macro`` の指定 (1/0, on/off, true/false)。省略や読めない値は ``None``。"""
+    text = (value or "").strip().lower()
+    if text in ("1", "on", "true", "yes"):
+        return True
+    if text in ("0", "off", "false", "no"):
+        return False
+    return None
+
+
+class Output:
+    """書き出すファイルの形式 (拡張子・マクロの扱い)。"""
+
+    def __init__(self, imported, with_macro: Optional[bool]):
+        self.imported = imported
+        if imported.legacy:                       # 旧形式は .xls のまま。マクロは入れられない
+            self.extension, self.type = "xls", XLS_TYPE
+            self.bundle, self.keep_vba = None, False
+            return
+        if with_macro is False:                   # マクロなし: 読み込んだマクロも落とす
+            self.extension, self.type = "xlsx", XLSX_TYPE
+            self.bundle, self.keep_vba = None, False
+            return
+        # 読み込んだファイルにマクロがあれば引き継ぎ、無ければ同梱のマクロを組み込む
+        self.bundle = None if imported.has_vba else macro.bundled(imported.spec.language)
+        self.keep_vba = imported.macro
+        if imported.macro or self.bundle:
+            self.extension, self.type = "xlsm", XLSM_TYPE
+        else:
+            self.extension, self.type = "xlsx", XLSX_TYPE
+
+    def disposition(self, suffix: str = "") -> str:
+        return (f"attachment; filename=wbs.{self.extension};"
+                f" filename*=UTF-8''{_filename(self.imported.spec, suffix, self.extension)}")
 
 
 def _filename(spec: BlankWBS, suffix: str = "", extension: str = "xlsx") -> str:
     stem = "".join(c for c in spec.title if c not in '\\/:*?"<>|').strip()
     return quote(f"{stem or 'wbs'}{suffix}_{spec.start:%Y%m%d}.{extension}")
-
-
-def _disposition(imported, suffix: str = "") -> str:
-    extension, _type = _kind(imported)
-    return (f"attachment; filename=wbs.{extension};"
-            f" filename*=UTF-8''{_filename(imported.spec, suffix, extension)}")
 
 
 # ----------------------------------------------------------------------
@@ -272,22 +302,27 @@ async def export_workbook(
     unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
     edits: Optional[str] = Form(None, description="画面で書き換えた値 (JSON)"),
+    with_macro: Optional[str] = Query(
+        None, alias="macro", description="1: マクロ有効 (.xlsm) / 0: マクロなし (.xlsx)"),
 ) -> Response:
     """記入済みの Excel を読み込み、ガントチャートを描き込んで返す。
 
-    画面に出しているのと同じバーを、浮動図形として書き込む。
+    画面に出しているのと同じバーを、浮動図形として書き込む。``macro`` が 0 なら
+    マクロなしの .xlsx、1 または省略なら、読み込んだファイルのマクロを引き継ぐか、
+    無ければ同梱のマクロを組み込んだ .xlsm (旧形式の .xls は、そのまま .xls)。
     """
     language = normalize(lang)
     imported = await _read_upload(file, unit, language, edits)
+    output = Output(imported, _flag(with_macro))
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "wbs.xlsx"
-        workbook.export(imported, path)
+        workbook.export(imported, path, macro=output.bundle, keep_vba=output.keep_vba)
         data = _finish(imported, path.read_bytes(), language)
 
     return Response(
         content=data,
-        media_type=_kind(imported)[1],
-        headers={"Content-Disposition": _disposition(imported, _chart_suffix(imported.spec))},
+        media_type=output.type,
+        headers={"Content-Disposition": output.disposition(_chart_suffix(imported.spec))},
     )
 
 

@@ -27,4 +27,4 @@ wbsgen = "wbsgen.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-wbsgen = ["web/static/*"]
+wbsgen = ["web/static/*", "macros/*"]

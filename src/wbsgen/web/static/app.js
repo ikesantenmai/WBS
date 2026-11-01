@@ -59,6 +59,10 @@ const UI = {
     export: 'ガントチャート付きで書き出す',
     xls_on: '.xls の読み書き: 使えます (LibreOffice あり)',
     xls_off: '.xls の読み書き: 使えません (サーバーに LibreOffice がありません)',
+    macro_label: '形式',
+    macro_on: 'マクロ有効 (.xlsm)',
+    macro_off: 'マクロなし (.xlsx)',
+    macro_tip: 'ダウンロードする Excel の形式。マクロ有効は、シートの状態とガントのバーを更新するマクロ (Alt+F8 →「UpdateWBS」) が付きます。',
     recalc: '再計算',
     recalc_count: '再計算 ({n} 件の変更)',
     recalculated: '再計算しました。ガントチャート・本日の状況・要員稼働・ネットワーク図を更新しました。',
@@ -221,6 +225,10 @@ const UI = {
     export: 'Export with Gantt chart',
     xls_on: '.xls support: available (LibreOffice found)',
     xls_off: '.xls support: unavailable (LibreOffice is not installed on the server)',
+    macro_label: 'Format',
+    macro_on: 'With macros (.xlsm)',
+    macro_off: 'No macros (.xlsx)',
+    macro_tip: 'Format of the downloaded Excel file.',
     recalc: 'Recalculate',
     recalc_count: 'Recalculate ({n} changes)',
     recalculated: 'Recalculated. The Gantt chart, today\'s status, workload and network diagram are updated.',
@@ -423,6 +431,9 @@ let pane = 'form';         // 狭い画面でどちらを見せているか ('fo
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
 let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
 let view = 'chart';        // 'chart' = ガントチャート / 'load' = 要員稼働チェック
+//: ダウンロードの形式 ('1' = マクロ有効 .xlsm / '0' = マクロなし .xlsx)
+const MACRO_KEY = 'wbsgen.macro';
+let macroMode = '1';
 let pickedMembers = new Set();  // 担当者別の画面で選んでいる名前
 let loadPick = null;       // 要員稼働チェックで押した数字 ({ member, day })。そのタスクを下に出す
 let loadMonth = 0;         // 要員稼働チェックで見ている月 (何番目か)
@@ -1852,6 +1863,7 @@ async function importBytes(name, bytes, unit = null, announce = false, edits = n
     // 待っている間に「戻る」や別の読み込みが起きていたら、この結果は捨てる
     if (token !== importToken) return false;
     loaded = { name, bytes, edits: edits || {} };
+    updateMacroField();
     fillMonths(model.workload || []);
     fillNetworkAvailability(model.network);
     fillMemberAvailability(model.people || []);
@@ -1903,6 +1915,7 @@ function setMode(next) {
   $('#btn-number').hidden = !chart;
   $('#btn-recalc').hidden = !chart;
   updateRecalc();
+  updateMacroField();
   $('#btn-build').hidden = chart;
   $('#preview-title').textContent = t(chart ? 'chart' : 'preview');
   $('#preview-hint').textContent = t(chart ? 'hint_chart' : 'hint_blank');
@@ -1984,6 +1997,28 @@ function storedLanguage() {
   return DEFAULT_LANGUAGE;
 }
 
+function storedMacroMode() {
+  try {
+    const saved = localStorage.getItem(MACRO_KEY);
+    if (saved === '0' || saved === '1') return saved;
+  } catch (_) { /* 保存領域が使えない */ }
+  return '1';
+}
+
+/**
+ * 形式の選択欄を出すか。マクロは日本語のシート名を前提にしているので日本語だけ、
+ * 読み込んだのが旧形式 (.xls) なら、そのまま .xls で書き出すので選べない。
+ */
+function updateMacroField() {
+  const legacy = mode === 'chart' && loaded && /\.xls$/i.test(loaded.name);
+  $('#macro-field').hidden = language !== 'ja' || !!legacy;
+}
+
+/** ダウンロードの URL に付ける、形式の指定。 */
+function macroQuery() {
+  return `&macro=${macroMode}`;
+}
+
 function rememberLanguage(value) {
   try {
     localStorage.setItem(LANGUAGE_KEY, value);
@@ -2002,6 +2037,7 @@ function applyLanguage() {
   $('#preview-hint').textContent = t(mode === 'chart' ? 'hint_chart' : 'hint_blank');
   $('#tagline').textContent = t(mode === 'chart' ? 'tagline_chart' : 'tagline_blank');
   updateRecalc();
+  updateMacroField();
 }
 
 /** 言語を切り替え、選択肢と表示を作り直す。 */
@@ -2043,6 +2079,11 @@ function fillChoices() {
   $('#network-type').replaceChildren(...['precedence', 'arrow'].map(
     (v) => el('option', { value: v, text: t(`network_type_${v}`) })));
   $('#network-type').value = networkType;
+  $('#macro-mode').replaceChildren(
+    el('option', { value: '1', text: t('macro_on') }),
+    el('option', { value: '0', text: t('macro_off') }));
+  $('#macro-mode').value = macroMode;
+  $('#macro-mode').title = t('macro_tip');
   $('#columns-mode').replaceChildren(...COLUMN_MODES.map(
     (m) => el('option', { value: m, text: t(`columns_${m}`) })));
   $('#columns-mode').value = columnsMode;
@@ -2094,6 +2135,10 @@ function bind() {
   $('#language').addEventListener('change',
                                   (event) => switchLanguage(event.target.value));
   $('#spec-form').addEventListener('submit', (event) => event.preventDefault());
+  $('#macro-mode').addEventListener('change', (event) => {
+    macroMode = event.target.value;
+    try { localStorage.setItem(MACRO_KEY, macroMode); } catch (_) { /* 保存できなくてもよい */ }
+  });
   $('#btn-build').addEventListener('click', download);
   $('#btn-export').addEventListener('click', exportChart);
   $('#btn-number').addEventListener('click', numberRows);
@@ -2158,7 +2203,7 @@ function bind() {
 
 /** 空の WBS を書き出す。 */
 function download() {
-  return save($('#btn-build'), 'busy_build', `/api/build?lang=${language}`, {
+  return save($('#btn-build'), 'busy_build', `/api/build?lang=${language}${macroQuery()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(currentSpec()),
@@ -2173,7 +2218,7 @@ function exportChart() {
   appendEdits(body, loaded.edits);
   const unit = $('#chart-unit').value;
   return save($('#btn-export'), 'busy_export',
-              `/api/export?lang=${language}&unit=${encodeURIComponent(unit)}`,
+              `/api/export?lang=${language}&unit=${encodeURIComponent(unit)}${macroQuery()}`,
               { method: 'POST', body });
 }
 
@@ -2331,6 +2376,7 @@ async function start() {
     banner(t('cannot_start', { reason: error.message }));
     return;
   }
+  macroMode = storedMacroMode();
   $('#version').textContent = meta.version ? `wbsgen ${meta.version}` : '';
   $('#version').title = t(meta.xls_supported ? 'xls_on' : 'xls_off');
   $('#language').replaceChildren(...meta.languages.map(

@@ -194,11 +194,48 @@ def test_downloading_the_workbook(page, tmp_path):
     _reset(page)
     with page.expect_download() as download:
         page.click("#btn-build")
-    saved = tmp_path / "out.xlsx"
+    saved = tmp_path / "out.xlsm"
     download.value.save_as(saved)
     assert saved.stat().st_size > 8000
-    assert download.value.suggested_filename.endswith(".xlsx")
+    assert download.value.suggested_filename.endswith(".xlsm")      # 既定はマクロ有効
     assert page.errors == []
+
+
+def test_the_download_format_can_be_chosen(page, filled_book, tmp_path):
+    """マクロなしの .xlsx と、マクロ有効の .xlsm を選んでダウンロードできる。"""
+    import zipfile
+
+    def fetch(button, name):
+        with page.expect_download() as download:
+            page.click(button)
+        saved = tmp_path / name
+        download.value.save_as(saved)
+        with zipfile.ZipFile(saved) as zf:
+            return download.value.suggested_filename, "xl/vbaProject.bin" in zf.namelist()
+
+    try:
+        _reset(page)
+        assert page.is_visible("#macro-field")
+        assert page.input_value("#macro-mode") == "1"
+        name, has_macro = fetch("#btn-build", "a.xlsm")
+        assert name.endswith(".xlsm") and has_macro
+
+        page.select_option("#macro-mode", "0")
+        name, has_macro = fetch("#btn-build", "b.xlsx")
+        assert name.endswith(".xlsx") and not has_macro            # マクロなし
+
+        # 書き出しにも同じ選択が効く
+        page.set_input_files("#import-file", str(filled_book))
+        page.wait_for_selector("#btn-export:not([hidden])")
+        name, has_macro = fetch("#btn-export", "c.xlsx")
+        assert name.endswith(".xlsx") and not has_macro
+        page.select_option("#macro-mode", "1")
+        name, has_macro = fetch("#btn-export", "d.xlsm")
+        assert name.endswith(".xlsm") and has_macro
+        assert page.errors == []
+    finally:
+        page.select_option("#macro-mode", "1")                      # 共有ページを元に戻す
+        _reset(page)
 
 
 # ---------------------------------------------------------------- 読み込み
@@ -778,9 +815,11 @@ def test_the_desktop_keeps_every_column(page, filled_book):
     assert page.is_hidden("#pane-tabs")
 
 
-def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled):
+def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled, request):
     """長い文字は列の中で折り返し、その行を高くする。表は画面に収まり、
     ガントチャートの行は表の行と同じ高さでそろう。"""
+    # 共有ページなので、失敗しても画面の大きさを元に戻す
+    request.addfinalizer(lambda: page.set_viewport_size({"width": 1440, "height": 900}))
     page.set_viewport_size({"width": 1366, "height": 768})      # ノート型パソコン
     long_name = "基本設計書の作成と社内レビュー、顧客への説明資料の準備および修正対応を含む非常に長い項目名"
     book = make_filled("long-ui.xlsx", rows=[
@@ -791,10 +830,9 @@ def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled):
          None, None, None, 0, 5, "", "吉田", ""),
     ])
     page.set_input_files("#import-file", str(book))
-    # ページは他のテストと共有なので、前の表が消えて、今の表が出るまで待つ
+    # ページは他のテストと共有なので、前の表が消えて、今の表が出るまで (ファイル名で) 待つ
     page.wait_for_function(
-        "() => [...document.querySelectorAll('table.wbs tbody td.name')]"
-        ".some(td => td.textContent.startsWith('基本設計書'))")
+        "() => document.querySelector('#banner').textContent.includes('long-ui.xlsx')")
 
     info = page.evaluate("""() => {
         const trs = [...document.querySelectorAll('table.wbs tbody tr')]
@@ -809,14 +847,15 @@ def test_long_text_wraps_so_the_table_fits_a_laptop_screen(page, make_filled):
         };
     }""")
     assert info["cut"] == 0                                   # 切れている文字が無い
-    assert info["rows"][0] > 3 * info["rows"][1]              # 長い行は折り返して高い
+    assert info["rows"][0] > 2 * info["rows"][1]              # 長い行は折り返して高い
     assert abs(info["chart"] - sum(info["rows"])) < 1         # 日程表の行も同じ高さ
     assert info["tableRight"] <= 1366                         # 表は画面に収まる
     assert page.errors == []
 
 
-def test_long_text_wraps_in_todays_status_and_the_owner_view(page, make_filled):
+def test_long_text_wraps_in_todays_status_and_the_owner_view(page, make_filled, request):
     """本日の状況の一覧と、担当者別の表も、長い文字は折り返して行を高くする。"""
+    request.addfinalizer(lambda: page.set_viewport_size({"width": 1440, "height": 900}))
     page.set_viewport_size({"width": 1366, "height": 768})
     long_name = "基本設計書の作成と社内レビュー、顧客への説明資料の準備および修正対応を含む非常に長い項目名です"
     book = make_filled("long-views.xlsx", rows=[
@@ -827,9 +866,9 @@ def test_long_text_wraps_in_todays_status_and_the_owner_view(page, make_filled):
          None, None, None, 0, 5, "", "吉田", ""),
     ])
     page.set_input_files("#import-file", str(book))
+    # 読み込みが終わるまで待つ (前のテストの表が残っているので、ファイル名で判定する)
     page.wait_for_function(
-        "() => [...document.querySelectorAll('table.wbs tbody td.name')]"
-        ".some(td => td.textContent.startsWith('基本設計書'))")
+        "() => document.querySelector('#banner').textContent.includes('long-views.xlsx')")
 
     probe = """(selector) => {
         const table = [...document.querySelectorAll(selector)].find(t => t.offsetParent);

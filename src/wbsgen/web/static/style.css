@@ -462,3 +462,7 @@ table.wbs td.wrap {
   padding-top: 5px; padding-bottom: 5px; vertical-align: middle;
 }
 table.wbs tbody td { vertical-align: middle; }
+
+/* 上部の「形式」の選択欄: 見出しを折り返さない */
+.topbar .inline-field { flex: none; white-space: nowrap; }
+.topbar .inline-field select { max-width: 190px; }

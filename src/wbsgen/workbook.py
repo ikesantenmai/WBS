@@ -34,7 +34,7 @@ from .daily import Digest, build as build_daily
 from .chart import running_end
 from .drawing import Drawing, Geometry, Shape
 from .i18n import Labels, labels as get_labels, status_kind
-from . import formulas, netdraw
+from . import formulas, macro as macro_module, netdraw
 from .inject import inject_cached_values, inject_drawing, sheet_part
 from .timeline import UNIT_DAY, Timeline
 from .workload import WorkloadMonth, build as build_workload
@@ -126,17 +126,31 @@ PLAN_TOP_ALONE = 0.22
 PLAN_BOTTOM_ALONE = 0.78
 
 
-def write(spec: BlankWBS, path) -> Path:
-    """``spec`` の空 WBS を ``path`` に書き出す。"""
-    return _Writer(spec).save(path)
+def write(spec: BlankWBS, path, macro: Optional[bytes] = None) -> Path:
+    """``spec`` の空 WBS を ``path`` に書き出す。
+
+    ``macro`` (VBA プロジェクトの中身) を渡すと、そのマクロを入れる (.xlsm にする)。
+    """
+    writer = _Writer(spec)
+    writer.macro = macro
+    return writer.save(path)
 
 
 #: ネットワーク図の上端 (見出しと凡例のぶんを空ける)
 NETWORK_TOP_PX = netdraw.CELL_PX * 3
 
 
-def export(imported, path, base_date=None) -> Path:
-    """読み込んだ WBS を、ガントチャートの図形つきで書き出す。"""
+def export(imported, path, base_date=None, macro: Optional[bytes] = None,
+           keep_vba: Optional[bool] = None) -> Path:
+    """読み込んだ WBS を、ガントチャートの図形つきで書き出す。
+
+    ``macro`` を渡すと、そのマクロを入れる。読み込んだファイルのマクロはそのまま引き継ぐ
+    ので、すでにマクロが入っているファイルには、渡しても入れない。
+
+    ``keep_vba`` は、読み込んだファイルのマクロ有効の形式を引き継ぐか。``False`` にして
+    ``macro`` も渡さなければ、マクロの無いブックになる (読み込んだマクロも落とす)。
+    既定 (``None``) は、読み込んだとおり。
+    """
     from .importer import resolve
 
     spec = imported.spec
@@ -144,7 +158,8 @@ def export(imported, path, base_date=None) -> Path:
     # 状態と遅れは基準日で決まるので、この日付で数え直してから書く
     resolve(imported.rows, spec.calendar(), day, spec.language)
     writer = _Writer(spec, rows=imported.rows, base_date=day)
-    writer.keep_vba = imported.macro
+    writer.keep_vba = imported.macro if keep_vba is None else keep_vba
+    writer.macro = None if (imported.has_vba and writer.keep_vba) else macro
     writer.set_formulas(imported)
     writer.workload = build_workload(imported.rows, spec.calendar())
     writer.daily = build_daily(imported.rows, spec.calendar(), day)
@@ -226,6 +241,8 @@ class _Writer:
         self.network = None
         #: マクロ有効の本として書き出すか (元のマクロを引き継ぐ)
         self.keep_vba = False
+        #: 書き出しに組み込むマクロ (VBA プロジェクトの中身)。無ければ組み込まない。
+        self.macro: Optional[bytes] = None
         #: 元のセルに入っていた数式 ((記入行の位置, 項目名) -> 数式)。そのまま残して書く。
         self.formulas: Dict[tuple, str] = {}
         #: 数式のセルに添える計算済みの値 (セル番地 -> 値)
@@ -283,6 +300,8 @@ class _Writer:
             diagram.finalize(netdraw.geometry())
             inject_drawing(path, sheet_part(path, self.labels.network_sheet),
                            diagram.to_xml())
+        if self.macro:
+            macro_module.embed(path, self.macro)
         return path
 
     def _base(self, source: bytes):
