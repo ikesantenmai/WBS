@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("fastapi", reason="Web アプリの依存 (pip install 'wbsgen[web]')")
 from fastapi.testclient import TestClient  # noqa: E402
 
+from wbsgen import km as km_module  # noqa: E402
 from wbsgen.web.app import app  # noqa: E402
 
 D = dt.date
@@ -830,3 +831,42 @@ def test_an_xls_file_can_be_exported_as_xlsx_or_xlsm(client, xls_book):
 def test_english_has_no_macro_format(client):
     response = client.post("/api/build?lang=en&format=xlsm", json={**SPEC})
     assert ".xlsx" in response.headers["content-disposition"]      # 英語はマクロなしになる
+
+
+# ----------------------------------------------------------------------
+# km 形式 (ボタン付きの .xls + アドインの zip)。環境変数 WBSGEN_KM で有効にする
+needs_km = pytest.mark.skipif(
+    not (km_module.available() and km_module.TEMPLATE.exists()),
+    reason="LibreOffice と python3-uno が必要")
+
+
+def test_km_is_off_unless_enabled(client, filled_book, monkeypatch):
+    monkeypatch.delenv("WBSGEN_KM", raising=False)
+    assert client.get("/api/meta").json()["km"] is False
+    assert client.post("/api/build?format=km", json=SPEC).status_code == 422
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export?format=km", files={"file": ("f.xlsx", handle.read(), "x")})
+    assert response.status_code == 422
+
+
+def test_the_bundled_km_template_holds_no_client_data():
+    raw = km_module.TEMPLATE.read_bytes()
+    for word in ("SBI", "池田", "口座", "野村"):
+        assert word.encode("utf-16-le") not in raw and word.encode("cp932") not in raw
+
+
+@needs_km
+def test_km_zip_has_buttons_addin_and_the_wbs(client, filled_book, monkeypatch):
+    monkeypatch.setenv("WBSGEN_KM", "1")
+    assert client.get("/api/meta").json()["km"] is True
+    with open(filled_book, "rb") as handle:
+        response = client.post("/api/export?format=km", files={"file": ("f.xlsx", handle.read(), "x")})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        names = zf.namelist()
+        assert "km_module.xla" in names
+        book = zf.read(next(n for n in names if n.endswith(".xls")))
+        assert zf.read("km_module.xla") == km_module.ADDIN.read_bytes()
+    assert book[:4] == XLS_MAGIC
+    assert "Ctls".encode("utf-8") in book or "Ctls".encode("utf-16-le") in book   # ActiveX のボタン

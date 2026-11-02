@@ -13,13 +13,13 @@ import json
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .. import __version__, convert, macro, workbook
+from .. import __version__, convert, km, macro, workbook
 from ..blank import DEFAULT_ROWS, MAX_ROWS, BlankWBS, SpecError, from_dict, to_dict
 from ..chart import build as build_chart
 from ..i18n import DEFAULT_LANGUAGE, LANGUAGES, labels as get_labels, message, normalize
@@ -66,6 +66,8 @@ def meta(lang: Optional[str] = Query(None, description="表示言語 (ja/en)")) 
         "version": __version__,
         # .xls を扱える (LibreOffice が入っている) か。デプロイ先の確認に使う
         "xls_supported": convert.available(),
+        # km 形式 (ボタン付きの .xls + アドインの zip) を出せるか。環境変数 WBSGEN_KM で有効にする
+        "km": km.enabled(),
         "office": convert.diagnose(),
         "language": language,
         "languages": [
@@ -152,6 +154,8 @@ def build_workbook(
     language = _language(lang, payload)
     spec = _spec({**payload, "language": language}, language)
     choice = _choice(fmt, with_macro)
+    if choice == "km":
+        return _km_response(spec, [], language)
     bundle = None if choice == "xlsx" else macro.bundled(spec.language)
     # .xls は、マクロ入りの .xlsm (または .xlsx) を作ってから変換する
     book = "xlsm" if bundle else "xlsx"
@@ -199,7 +203,7 @@ def _flag(value: Optional[str]) -> Optional[bool]:
     return None
 
 
-FORMATS = ("xlsm", "xlsx", "xls")
+FORMATS = ("xlsm", "xlsx", "xls", "km")
 
 
 def _choice(fmt: Optional[str], with_macro: Optional[str] = None) -> Optional[str]:
@@ -351,7 +355,10 @@ async def export_workbook(
     """
     language = normalize(lang)
     imported = await _read_upload(file, unit, language, edits)
-    output = Output(imported, _choice(fmt, with_macro))
+    choice = _choice(fmt, with_macro)
+    if choice == "km":
+        return _km_response(imported.spec, imported.rows, language)
+    output = Output(imported, choice)
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "wbs.xlsx"
         workbook.export(imported, path, macro=output.bundle, keep_vba=output.keep_vba)
@@ -382,6 +389,21 @@ async def number_workbook(
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"edits": numbered, "count": count}
+
+
+def _km_response(spec: BlankWBS, rows, language: str) -> Response:
+    """km 形式: ボタン付きの .xls と km_module.xla の zip (公開サイトでだけ有効)。"""
+    if not km.enabled():
+        raise HTTPException(status_code=422, detail=message(language, "km_disabled"))
+    stem = Path(unquote(_filename(spec, "", "xls"))).stem
+    try:
+        data = km.build(spec, rows, stem)
+    except km.KMError as exc:
+        raise HTTPException(status_code=422,
+                            detail=message(language, "xls_failed", reason=exc))
+    name = quote(f"{stem}_km.zip")
+    return Response(content=data, media_type="application/zip", headers={
+        "Content-Disposition": f"attachment; filename=wbs_km.zip; filename*=UTF-8''{name}"})
 
 
 def _finish(output: "Output", data: bytes, language: str) -> bytes:

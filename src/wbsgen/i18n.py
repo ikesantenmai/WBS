@@ -427,6 +427,7 @@ MESSAGES = {
         "xls_needs_office": ".xls を扱うには LibreOffice が必要です。サーバーに LibreOffice "
                             "(soffice) を入れるか、Excel で .xlsx に保存し直してください。",
         "xls_failed": ".xls を変換できませんでした: {reason}",
+        "km_disabled": "この形式 (ボタン付き .xls) は、このサイトでは使えません。",
         "no_suffix": "(拡張子なし)",
         "no_number_column": "「項番」の列が見つかりません。",
         "bad_edits": "編集内容を読み取れません。",
@@ -469,6 +470,7 @@ MESSAGES = {
         "xls_needs_office": "LibreOffice is required to handle .xls files. Install LibreOffice "
                             "(soffice) on the server, or re-save the file as .xlsx in Excel.",
         "xls_failed": "Could not convert the .xls file: {reason}",
+        "km_disabled": "This format (.xls with buttons) is not available on this site.",
         "no_suffix": "(no extension)",
         "no_number_column": "No \"No.\" column found.",
         "bad_edits": "The edits could not be read.",

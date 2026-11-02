@@ -62,6 +62,7 @@ const UI = {
     macro_label: '形式',
     macro_on: 'マクロ有効 (.xlsm)',
     macro_off: 'マクロなし (.xlsx)',
+    macro_km: 'Excel 97-2003 (.xls) + ボタン・アドイン (zip)',
     macro_xls: 'Excel 97-2003 (.xls)',
     macro_tip: 'ダウンロードする Excel の形式。マクロ有効 (.xlsm) と .xls には、シートの状態とガントのバーを更新するマクロ (Alt+F8 →「UpdateWBS」) が付きます。',
     recalc: '再計算',
@@ -229,6 +230,7 @@ const UI = {
     macro_label: 'Format',
     macro_on: 'With macros (.xlsm)',
     macro_off: 'Excel (.xlsx)',
+    macro_km: 'Excel 97-2003 (.xls) + buttons/add-in (zip)',
     macro_xls: 'Excel 97-2003 (.xls)',
     macro_tip: 'Format of the downloaded Excel file.',
     recalc: 'Recalculate',
@@ -2002,7 +2004,7 @@ function storedLanguage() {
 function storedMacroMode() {
   try {
     const saved = localStorage.getItem(MACRO_KEY);
-    if (saved === 'xlsm' || saved === 'xlsx' || saved === 'xls') return saved;
+    if (['xlsm', 'xlsx', 'xls', 'km'].includes(saved)) return saved;
     if (saved === '0') return 'xlsx';                // 以前の保存の仕方
   } catch (_) { /* 保存領域が使えない */ }
   return 'xlsm';
@@ -2013,6 +2015,7 @@ function macroOptions() {
   const options = [];
   if (language === 'ja') options.push(['xlsm', t('macro_on')]);
   options.push(['xlsx', t('macro_off')], ['xls', t('macro_xls')]);
+  if (meta && meta.km && language === 'ja') options.push(['km', t('macro_km')]);   // 公開サイトでだけ
   return options;
 }
 
