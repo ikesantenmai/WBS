@@ -791,3 +791,42 @@ def test_api_answers_are_not_cached(client):
     response = client.get("/api/meta")
     assert response.headers["cache-control"] == "no-store"
     assert "xls_supported" in response.json()
+
+
+# ---------------------------------------------------------------- 形式の選択 (.xls)
+@needs_office
+def test_xls_can_be_chosen_for_every_download(client, filled_book):
+    """format=xls で、旧形式 (.xls) のダウンロードを選べる。同梱のマクロも引き継ぐ。"""
+    blank = client.post("/api/build?format=xls", json={**SPEC})
+    assert ".xls" in blank.headers["content-disposition"]
+    assert ".xlsx" not in blank.headers["content-disposition"]
+    assert blank.content[:4] == XLS_MAGIC
+
+    with open(filled_book, "rb") as handle:
+        out = client.post("/api/export?format=xls",
+                          files={"file": ("f.xlsx", handle.read(), "x")})
+    assert out.status_code == 200
+    assert out.headers["content-type"].startswith("application/vnd.ms-excel")
+    assert out.content[:4] == XLS_MAGIC
+    # マクロ (標準モジュール名) が、.xls の VBA プロジェクトに入っている
+    assert "modWBSUpdate".encode("utf-16-le") in out.content
+    assert "modWBSUpdate".encode("utf-16-le") in blank.content
+
+
+@needs_office
+def test_an_xls_file_can_be_exported_as_xlsx_or_xlsm(client, xls_book):
+    """旧形式で読んだファイルも、形式を選べば .xlsx / .xlsm で書き出せる。"""
+    def export(fmt):
+        return client.post(f"/api/export?format={fmt}",
+                           files={"file": ("f.xls", xls_book, "x")})
+
+    assert ".xls" in export("xls").headers["content-disposition"]
+    assert ".xlsx" in export("xlsx").headers["content-disposition"]
+    assert ".xlsm" in export("xlsm").headers["content-disposition"]
+    default = client.post("/api/export", files={"file": ("f.xls", xls_book, "x")})
+    assert default.content[:4] == XLS_MAGIC                 # 指定が無ければ、読んだ形式のまま
+
+
+def test_english_has_no_macro_format(client):
+    response = client.post("/api/build?lang=en&format=xlsm", json={**SPEC})
+    assert ".xlsx" in response.headers["content-disposition"]      # 英語はマクロなしになる

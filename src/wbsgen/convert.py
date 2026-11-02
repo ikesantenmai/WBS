@@ -85,13 +85,13 @@ def to_xlsx(raw: bytes) -> bytes:
     return _convert(raw, "xls", "xlsx")
 
 
-def to_xls(raw: bytes) -> bytes:
-    """.xlsx の中身を .xls に変換する。"""
-    return _convert(raw, "xlsx", "xls")
+def to_xls(raw: bytes, macro: bool = False) -> bytes:
+    """.xlsx の中身を .xls に変換する。``macro`` は、マクロ入りの .xlsm のとき (マクロも .xls に引き継ぐ)。"""
+    return _convert(raw, "xlsm" if macro else "xlsx", "xls")
 
 
 def _convert(raw: bytes, source: str, target: str) -> bytes:
-    key = (hashlib.sha256(raw).hexdigest(), target)
+    key = (hashlib.sha256(raw).hexdigest(), source, target)
     if key in _cache:
         _cache.move_to_end(key)
         return _cache[key]

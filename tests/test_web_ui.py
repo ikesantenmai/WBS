@@ -216,11 +216,11 @@ def test_the_download_format_can_be_chosen(page, filled_book, tmp_path):
     try:
         _reset(page)
         assert page.is_visible("#macro-field")
-        assert page.input_value("#macro-mode") == "1"
+        assert page.input_value("#macro-mode") == "xlsm"
         name, has_macro = fetch("#btn-build", "a.xlsm")
         assert name.endswith(".xlsm") and has_macro
 
-        page.select_option("#macro-mode", "0")
+        page.select_option("#macro-mode", "xlsx")
         name, has_macro = fetch("#btn-build", "b.xlsx")
         assert name.endswith(".xlsx") and not has_macro            # マクロなし
 
@@ -229,12 +229,24 @@ def test_the_download_format_can_be_chosen(page, filled_book, tmp_path):
         page.wait_for_selector("#btn-export:not([hidden])")
         name, has_macro = fetch("#btn-export", "c.xlsx")
         assert name.endswith(".xlsx") and not has_macro
-        page.select_option("#macro-mode", "1")
+        page.select_option("#macro-mode", "xlsm")
         name, has_macro = fetch("#btn-export", "d.xlsm")
         assert name.endswith(".xlsm") and has_macro
+
+        # Excel 97-2003 (.xls) も選べる (LibreOffice が無い環境では、選べても変換できない)
+        from wbsgen import convert
+
+        if convert.available():
+            page.select_option("#macro-mode", "xls")
+            with page.expect_download() as download:
+                page.click("#btn-export")
+            saved = tmp_path / "e.xls"
+            download.value.save_as(saved)
+            assert download.value.suggested_filename.endswith(".xls")
+            assert saved.read_bytes()[:4] == b"\xd0\xcf\x11\xe0"
         assert page.errors == []
     finally:
-        page.select_option("#macro-mode", "1")                      # 共有ページを元に戻す
+        page.select_option("#macro-mode", "xlsm")                      # 共有ページを元に戻す
         _reset(page)
 
 

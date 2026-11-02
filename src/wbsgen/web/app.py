@@ -139,26 +139,39 @@ def _weekday(timeline, spec: BlankWBS, col) -> str:
 def build_workbook(
     payload: Dict[str, Any] = Body(...),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
+    fmt: Optional[str] = Query(None, alias="format", description="xlsm / xlsx / xls"),
     with_macro: Optional[str] = Query(
-        None, alias="macro", description="1: マクロ有効 (.xlsm) / 0: マクロなし (.xlsx)"),
+        None, alias="macro", description="(旧) 1: マクロ有効 (.xlsm) / 0: マクロなし (.xlsx)"),
 ) -> Response:
     """Excel を生成して返す。
 
-    ``macro`` が 0 ならマクロなしの .xlsx、1 または省略なら、同梱のマクロ
-    (日本語のときだけ) を組み込んだマクロ有効の .xlsm。
+    ``format`` で、マクロ有効の .xlsm / マクロなしの .xlsx / 旧形式の .xls を選ぶ。
+    省略すると .xlsm (同梱のマクロは日本語のときだけ。英語は .xlsx)。
+    .xls には、同梱のマクロも引き継ぐ。
     """
     language = _language(lang, payload)
     spec = _spec({**payload, "language": language}, language)
-    bundle = None if _flag(with_macro) is False else macro.bundled(spec.language)
-    extension = "xlsm" if bundle else "xlsx"
+    choice = _choice(fmt, with_macro)
+    bundle = None if choice == "xlsx" else macro.bundled(spec.language)
+    # .xls は、マクロ入りの .xlsm (または .xlsx) を作ってから変換する
+    book = "xlsm" if bundle else "xlsx"
+    extension = choice if choice in ("xls", "xlsx") else book
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / f"wbs.{extension}"
+        path = Path(tmp) / f"wbs.{book}"
         workbook.write(spec, path, bundle)
         data = path.read_bytes()
+    if extension == "xls":
+        try:
+            data = convert.to_xls(data, bool(bundle))
+        except convert.ConvertError as exc:
+            raise HTTPException(status_code=422, detail=message(
+                language, "xls_needs_office" if exc.reason == "missing" else "xls_failed",
+                reason=exc))
 
+    media = {"xls": XLS_TYPE, "xlsm": XLSM_TYPE, "xlsx": XLSX_TYPE}[extension]
     return Response(
         content=data,
-        media_type=XLSM_TYPE if bundle else XLSX_TYPE,
+        media_type=media,
         headers={
             "Content-Disposition":
                 f"attachment; filename=wbs.{extension};"
@@ -186,21 +199,45 @@ def _flag(value: Optional[str]) -> Optional[bool]:
     return None
 
 
-class Output:
-    """書き出すファイルの形式 (拡張子・マクロの扱い)。"""
+FORMATS = ("xlsm", "xlsx", "xls")
 
-    def __init__(self, imported, with_macro: Optional[bool]):
+
+def _choice(fmt: Optional[str], with_macro: Optional[str] = None) -> Optional[str]:
+    """ダウンロードの形式の指定 (``xlsm`` / ``xlsx`` / ``xls``)。省略なら ``None``。
+
+    以前の ``macro`` の指定 (1 = マクロ有効、0 = マクロなし) も受け付ける。
+    """
+    text = (fmt or "").strip().lower().lstrip(".")
+    if text in FORMATS:
+        return text
+    flag = _flag(with_macro)
+    return None if flag is None else ("xlsm" if flag else "xlsx")
+
+
+class Output:
+    """書き出すファイルの形式 (拡張子・マクロの扱い)。
+
+    ``choice`` は、画面で選んだ形式。省略なら、読み込んだファイルの形式のまま
+    (旧形式 .xls で読めば .xls、.xlsm なら .xlsm、…)。
+    """
+
+    def __init__(self, imported, choice: Optional[str]):
         self.imported = imported
-        if imported.legacy:                       # 旧形式は .xls のまま。マクロは入れられない
+        language = imported.spec.language
+        self.bundle, self.keep_vba, self.macro_book = None, False, False
+        if choice == "xls" or (choice is None and imported.legacy):
             self.extension, self.type = "xls", XLS_TYPE
-            self.bundle, self.keep_vba = None, False
+            if not imported.legacy:               # 旧形式で読んだときは、マクロを足さない
+                self.bundle = None if imported.has_vba else macro.bundled(language)
+                self.keep_vba = imported.macro
+            # マクロ入りの .xlsm を作ってから .xls に変換する (マクロも .xls に引き継ぐ)
+            self.macro_book = bool(self.bundle) or (imported.has_vba and self.keep_vba)
             return
-        if with_macro is False:                   # マクロなし: 読み込んだマクロも落とす
+        if choice == "xlsx":                      # マクロなし: 読み込んだマクロも落とす
             self.extension, self.type = "xlsx", XLSX_TYPE
-            self.bundle, self.keep_vba = None, False
             return
         # 読み込んだファイルにマクロがあれば引き継ぎ、無ければ同梱のマクロを組み込む
-        self.bundle = None if imported.has_vba else macro.bundled(imported.spec.language)
+        self.bundle = None if imported.has_vba else macro.bundled(language)
         self.keep_vba = imported.macro
         if imported.macro or self.bundle:
             self.extension, self.type = "xlsm", XLSM_TYPE
@@ -302,22 +339,23 @@ async def export_workbook(
     unit: Optional[str] = Query(None, description="表示単位を上書きする (day/week/month)"),
     lang: Optional[str] = Query(None, description="表示言語 (ja/en)"),
     edits: Optional[str] = Form(None, description="画面で書き換えた値 (JSON)"),
+    fmt: Optional[str] = Query(None, alias="format", description="xlsm / xlsx / xls"),
     with_macro: Optional[str] = Query(
-        None, alias="macro", description="1: マクロ有効 (.xlsm) / 0: マクロなし (.xlsx)"),
+        None, alias="macro", description="(旧) 1: マクロ有効 (.xlsm) / 0: マクロなし (.xlsx)"),
 ) -> Response:
     """記入済みの Excel を読み込み、ガントチャートを描き込んで返す。
 
-    画面に出しているのと同じバーを、浮動図形として書き込む。``macro`` が 0 なら
-    マクロなしの .xlsx、1 または省略なら、読み込んだファイルのマクロを引き継ぐか、
-    無ければ同梱のマクロを組み込んだ .xlsm (旧形式の .xls は、そのまま .xls)。
+    画面に出しているのと同じバーを、浮動図形として書き込む。``format`` で、
+    マクロ有効の .xlsm / マクロなしの .xlsx / 旧形式の .xls を選ぶ。省略すると、
+    読み込んだファイルの形式のまま (マクロが無ければ、同梱のマクロを組み込む)。
     """
     language = normalize(lang)
     imported = await _read_upload(file, unit, language, edits)
-    output = Output(imported, _flag(with_macro))
+    output = Output(imported, _choice(fmt, with_macro))
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "wbs.xlsx"
         workbook.export(imported, path, macro=output.bundle, keep_vba=output.keep_vba)
-        data = _finish(imported, path.read_bytes(), language)
+        data = _finish(output, path.read_bytes(), language)
 
     return Response(
         content=data,
@@ -346,12 +384,12 @@ async def number_workbook(
     return {"edits": numbered, "count": count}
 
 
-def _finish(imported, data: bytes, language: str) -> bytes:
-    """書き出す中身を、読み込んだ形式に合わせる (旧形式なら .xls に戻す)。"""
-    if not imported.legacy:
+def _finish(output: "Output", data: bytes, language: str) -> bytes:
+    """書き出す中身を、選んだ形式に合わせる (.xls なら変換する)。"""
+    if output.extension != "xls":
         return data
     try:
-        return convert.to_xls(data)
+        return convert.to_xls(data, output.macro_book)
     except convert.ConvertError as exc:
         raise HTTPException(status_code=422,
                             detail=message(language, "xls_failed", reason=exc))

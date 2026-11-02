@@ -62,7 +62,8 @@ const UI = {
     macro_label: '形式',
     macro_on: 'マクロ有効 (.xlsm)',
     macro_off: 'マクロなし (.xlsx)',
-    macro_tip: 'ダウンロードする Excel の形式。マクロ有効は、シートの状態とガントのバーを更新するマクロ (Alt+F8 →「UpdateWBS」) が付きます。',
+    macro_xls: 'Excel 97-2003 (.xls)',
+    macro_tip: 'ダウンロードする Excel の形式。マクロ有効 (.xlsm) と .xls には、シートの状態とガントのバーを更新するマクロ (Alt+F8 →「UpdateWBS」) が付きます。',
     recalc: '再計算',
     recalc_count: '再計算 ({n} 件の変更)',
     recalculated: '再計算しました。ガントチャート・本日の状況・要員稼働・ネットワーク図を更新しました。',
@@ -227,7 +228,8 @@ const UI = {
     xls_off: '.xls support: unavailable (LibreOffice is not installed on the server)',
     macro_label: 'Format',
     macro_on: 'With macros (.xlsm)',
-    macro_off: 'No macros (.xlsx)',
+    macro_off: 'Excel (.xlsx)',
+    macro_xls: 'Excel 97-2003 (.xls)',
     macro_tip: 'Format of the downloaded Excel file.',
     recalc: 'Recalculate',
     recalc_count: 'Recalculate ({n} changes)',
@@ -431,9 +433,9 @@ let pane = 'form';         // 狭い画面でどちらを見せているか ('fo
 let columnsMode = 'min';   // 狭い画面で出す列 ('min' / 'key' / 'all')
 let lastView = null;       // 直前に描いた内容 (画面幅が変わったら描き直す)
 let view = 'chart';        // 'chart' = ガントチャート / 'load' = 要員稼働チェック
-//: ダウンロードの形式 ('1' = マクロ有効 .xlsm / '0' = マクロなし .xlsx)
+//: ダウンロードの形式 ('xlsm' = マクロ有効 / 'xlsx' = マクロなし / 'xls' = Excel 97-2003)
 const MACRO_KEY = 'wbsgen.macro';
-let macroMode = '1';
+let macroMode = 'xlsm';
 let pickedMembers = new Set();  // 担当者別の画面で選んでいる名前
 let loadPick = null;       // 要員稼働チェックで押した数字 ({ member, day })。そのタスクを下に出す
 let loadMonth = 0;         // 要員稼働チェックで見ている月 (何番目か)
@@ -2000,23 +2002,46 @@ function storedLanguage() {
 function storedMacroMode() {
   try {
     const saved = localStorage.getItem(MACRO_KEY);
-    if (saved === '0' || saved === '1') return saved;
+    if (saved === 'xlsm' || saved === 'xlsx' || saved === 'xls') return saved;
+    if (saved === '0') return 'xlsx';                // 以前の保存の仕方
   } catch (_) { /* 保存領域が使えない */ }
-  return '1';
+  return 'xlsm';
+}
+
+/** 選べる形式 (マクロは日本語のシート名が前提なので、英語では .xlsm を出さない)。 */
+function macroOptions() {
+  const options = [];
+  if (language === 'ja') options.push(['xlsm', t('macro_on')]);
+  options.push(['xlsx', t('macro_off')], ['xls', t('macro_xls')]);
+  return options;
+}
+
+/** 形式の選択欄を、いまの言語の選択肢で作り直す。 */
+function fillMacroField() {
+  const options = macroOptions();
+  if (!options.some(([value]) => value === macroMode)) macroMode = 'xlsx';
+  $('#macro-mode').replaceChildren(
+    ...options.map(([value, text]) => el('option', { value, text })));
+  $('#macro-mode').value = macroMode;
+  $('#macro-mode').title = t('macro_tip');
 }
 
 /**
- * 形式の選択欄を出すか。マクロは日本語のシート名を前提にしているので日本語だけ、
- * 読み込んだのが旧形式 (.xls) なら、そのまま .xls で書き出すので選べない。
+ * ファイルを読み込んだとき、形式の既定を決める。旧形式 (.xls) で読んだなら .xls
+ * (保存はしない)、それ以外は前回選んだ形式。
  */
 function updateMacroField() {
   const legacy = mode === 'chart' && loaded && /\.xls$/i.test(loaded.name);
-  $('#macro-field').hidden = language !== 'ja' || !!legacy;
+  const wanted = legacy ? 'xls' : storedMacroMode();
+  if (macroMode !== wanted && macroOptions().some(([value]) => value === wanted)) {
+    macroMode = wanted;
+  }
+  fillMacroField();
 }
 
 /** ダウンロードの URL に付ける、形式の指定。 */
 function macroQuery() {
-  return `&macro=${macroMode}`;
+  return `&format=${macroMode}`;
 }
 
 function rememberLanguage(value) {
@@ -2079,11 +2104,7 @@ function fillChoices() {
   $('#network-type').replaceChildren(...['precedence', 'arrow'].map(
     (v) => el('option', { value: v, text: t(`network_type_${v}`) })));
   $('#network-type').value = networkType;
-  $('#macro-mode').replaceChildren(
-    el('option', { value: '1', text: t('macro_on') }),
-    el('option', { value: '0', text: t('macro_off') }));
-  $('#macro-mode').value = macroMode;
-  $('#macro-mode').title = t('macro_tip');
+  fillMacroField();
   $('#columns-mode').replaceChildren(...COLUMN_MODES.map(
     (m) => el('option', { value: m, text: t(`columns_${m}`) })));
   $('#columns-mode').value = columnsMode;
