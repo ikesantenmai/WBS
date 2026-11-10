@@ -870,3 +870,22 @@ def test_km_zip_has_buttons_addin_and_the_wbs(client, filled_book, monkeypatch):
         assert zf.read("km_module.xla") == km_module.ADDIN.read_bytes()
     assert book[:4] == XLS_MAGIC
     assert "Ctls".encode("utf-8") in book or "Ctls".encode("utf-16-le") in book   # ActiveX のボタン
+
+
+@needs_km
+def test_km_writes_the_holidays_into_the_settings_sheet(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("WBSGEN_KM", "1")
+    spec = {**SPEC, "start": "2026-04-01", "end": "2027-03-31", "members": ["設計"]}
+    response = client.post("/api/build?format=km", json=spec)
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        (tmp_path / "km.xls").write_bytes(zf.read(next(n for n in zf.namelist() if n.endswith(".xls"))))
+    if not km_module.convert.available():
+        pytest.skip("LibreOffice が必要")
+    xlsx = km_module.convert.to_xlsx((tmp_path / "km.xls").read_bytes())
+    sheet = openpyxl.load_workbook(io.BytesIO(xlsx))["設定"]
+    days = [sheet.cell(row=r, column=13).value for r in range(5, 24)]
+    days = [d.date() for d in days if d]
+    assert dt.date(2026, 4, 29) in days and dt.date(2026, 5, 5) in days   # 昭和の日・こどもの日
+    assert dt.date(2027, 1, 1) in days                                    # 元日
+    assert days == sorted(days)

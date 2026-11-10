@@ -83,6 +83,8 @@ def build(spec, rows: List[Any], stem: str) -> bytes:
         "start": spec.start.isoformat(),
         "period_days": spec.period_days,
         "members": [str(m) for m in spec.members],
+        # 祝祭日 (表示期間内)。設定シートの「休日設定(個別)」に書く
+        "holidays": [d.isoformat() for d in spec.calendar().holidays_between(spec.start, spec.end)],
         "rows": [_row(row) for row in rows],
         "port": 2100 + os.getpid() % 800,
     }

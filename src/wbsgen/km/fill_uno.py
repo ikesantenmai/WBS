@@ -102,6 +102,10 @@ def fill(doc, data):
         members.getCellByPosition(3, 3 + offset).String = "○"
 
     settings = sheets.getByName("設定")
+    # 祝祭日: 設定シートの「休日設定(個別)」(DEFC_Calender_Off = M5:M23、あふれた分は M28:M45)
+    slots = [(12, y) for y in range(4, 23)] + [(12, y) for y in range(27, 45)]
+    for (x, y), day in zip(slots, data.get("holidays", [])):
+        settings.getCellByPosition(x, y).Value = serial(day)
     if data.get("start"):
         settings.getCellRangeByName("C16").Value = serial(data["start"])      # DEFC_Chart_StartDay
     if data.get("period_days"):
