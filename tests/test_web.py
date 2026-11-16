@@ -916,6 +916,22 @@ def test_km_buttons_are_made_by_a_macro_when_the_book_opens(client, monkeypatch,
     code = {name: text for _, _, name, text in oletools.VBA_Parser(str(path)).extract_macros()}
     book = code["ThisWorkbook.cls"]
     assert "Call WBSGEN_EnsureButtons" in book
-    assert book.count("WBSGEN_AddButton Sheet") == 22
-    assert 'WBSGEN_AddButton Sheet1, "BTN_MenuWndDisp", "メニュー"' in book
+    assert book.count("WBSGEN_AddButton(Sheet") == 22
+    assert 'WBSGEN_AddButton(Sheet1, "BTN_MenuWndDisp", "メニュー"' in book
     assert not any("VB_Control" in text for text in code.values())       # 宣言とボタンの食い違いを作らない
+
+
+@needs_km
+def test_km_revision_number_is_not_newer_than_the_addin(client, monkeypatch, tmp_path):
+    """ブックの版番号がアドイン (1.13) より新しいと、ブックを開くときのコードが全ボタンを隠す。"""
+    olefile = pytest.importorskip("olefile")
+    monkeypatch.setenv("WBSGEN_KM", "1")
+    response = client.post("/api/build?format=xls", json={**SPEC, "members": ["設計"]})
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        book = zf.read(next(n for n in zf.namelist() if n.endswith(".xls")))
+        addin = zf.read("km_module.xla")
+    def revision(raw):
+        text = olefile.OleFileIO(io.BytesIO(raw)).get_metadata().revision_number.decode()
+        major, _, minor = text.partition(".")
+        return int(major) * 100 + int(minor or 0)
+    assert 0 < revision(book) <= revision(addin)

@@ -91,30 +91,37 @@ def add_button_macro(doc):
             caption = str(getattr(model, "Label", "")).replace('"', '""')
             point = 72.0 / 2540.0                      # 1/100 mm -> ポイント
             calls.append(
-                f'    WBSGEN_AddButton {module}, "{shape.Name}", "{caption}", '
+                f'    msg = msg & WBSGEN_AddButton({module}, "{shape.Name}", "{caption}", '
                 f'{shape.Position.X * point:.1f}, {shape.Position.Y * point:.1f}, '
                 f'{shape.Size.Width * point:.1f}, {shape.Size.Height * point:.1f}, '
-                f'{"False" if shape.Name in HIDDEN else "True"}')
+                f'{"False" if shape.Name in HIDDEN else "True"})')
     code = (
         "\n'--------------------------------------------------------\n"
-        "' wbsgen: ボタンが無ければ作る (ブックを開いたときに呼ぶ)\n"
+        "' wbsgen: ボタンが無ければ作る (ブックを開いたときに呼ぶ)。作れなかったときは理由を表示する\n"
         "Private Sub WBSGEN_EnsureButtons()\n"
+        "    Dim msg As String\n"
         "    On Error Resume Next\n" + "\n".join(calls) + "\n"
+        "    On Error GoTo 0\n"
+        "    If Len(msg) > 0 Then MsgBox \"ボタンを作れませんでした:\" & vbLf & Left(msg, 800), vbExclamation, \"wbsgen\"\n"
         "End Sub\n\n"
-        "Private Sub WBSGEN_AddButton(ws As Object, nm As String, cap As String, _\n"
-        "        l As Double, t As Double, w As Double, h As Double, vis As Boolean)\n"
+        "Private Function WBSGEN_AddButton(ws As Object, nm As String, cap As String, _\n"
+        "        l As Double, t As Double, w As Double, h As Double, vis As Boolean) As String\n"
         "    Dim o As Object\n"
         "    On Error Resume Next\n"
         "    Set o = ws.OLEObjects(nm)\n"
-        "    If Not o Is Nothing Then Exit Sub\n"
+        "    Err.Clear\n"
+        "    If Not o Is Nothing Then Exit Function\n"
         "    Set o = ws.OLEObjects.Add(ClassType:=\"Forms.CommandButton.1\", _\n"
         "        Left:=l, Top:=t, Width:=w, Height:=h)\n"
-        "    If o Is Nothing Then Exit Sub\n"
+        "    If Err.Number <> 0 Or o Is Nothing Then\n"
+        "        WBSGEN_AddButton = ws.Name & \" / \" & nm & \": \" & Err.Number & \" \" & Err.Description & vbLf\n"
+        "        Exit Function\n"
+        "    End If\n"
         "    o.Name = nm\n"
         "    o.Object.Caption = cap\n"
         "    o.Object.TakeFocusOnClick = False\n"
         "    o.Visible = vis\n"
-        "End Sub\n")
+        "End Function\n")
     library = doc.BasicLibraries.getByName("VBAProject")
     source = library.getByName("ThisWorkbook")
     marker = "Private Sub Workbook_Open()"
@@ -170,6 +177,9 @@ def fill(doc, data):
     if data.get("period_days"):
         settings.getCellRangeByName("C19").Value = data["period_days"]        # DEFC_Chart_Span
     doc.DocumentProperties.Title = data.get("title", "") or "開発マイルストーン"
+    # 版番号 (Revision number)。ブックを開くときのコードが、アドインの版 (1.13) と比べて、
+    # ブックの方が新しいと全ボタンを隠す。LibreOffice は保存のたびに増やすので、1 から始める
+    doc.DocumentProperties.EditingCycles = 0
 
 
 if __name__ == "__main__":
