@@ -918,3 +918,9 @@ def test_km_sheet_code_declares_the_buttons(client, monkeypatch, tmp_path):
         declared[name] = [line for line in code.splitlines() if "VB_Control" in line]
     assert len(declared["Sheet1.cls"]) == 6 and len(declared["Sheet3.cls"]) == 9
     assert any("BTN_MenuWndDisp, 4, 3" in line for line in declared["Sheet1.cls"])
+    # ブックを開いたとき、足りないボタンを作るマクロも入っている
+    code = {name: code for _, _, name, code in oletools.VBA_Parser(str(path)).extract_macros()}
+    book = code["ThisWorkbook.cls"]
+    assert "Call WBSGEN_EnsureButtons" in book
+    assert book.count("WBSGEN_AddButton Sheet") == 22
+    assert 'WBSGEN_AddButton Sheet1, "BTN_MenuWndDisp", "メニュー"' in book

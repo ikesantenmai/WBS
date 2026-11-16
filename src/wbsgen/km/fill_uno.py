@@ -72,6 +72,7 @@ def main(template, out, data_file):
     try:
         fill(doc, data)
         declare_controls(doc)
+        add_button_macro(doc)
         doc.storeToURL("file://" + out, (prop("FilterName", "MS Excel 97"),))
     finally:
         doc.close(True)
@@ -87,6 +88,66 @@ def declare_controls(doc):
         lines = "".join(f'Attribute VB_Control = "{c}, MSForms, CommandButton"\n' for c in controls)
         if "VB_Control" not in source:
             library.replaceByName(module, lines + source)
+
+
+#: 元のテンプレートで、最初は非表示のボタン (抽出ボタン)。残りは表示
+HIDDEN = {"BTN_SortEx1Disp", "BTN_SortEx2Disp", "BTN_SortAllDisp"}
+
+
+def add_button_macro(doc):
+    """ブックを開いたとき、足りない ActiveX ボタンを Excel 自身に作らせるマクロを足す。
+
+    ファイルの中のボタンを Excel が読み込めなかったときの備え。同じ名前のボタンが
+    既にあれば何もしない。作ったボタンには、シートのコードにある BTN_*_Click が
+    名前でつながる。
+    """
+    sheets = {doc.Sheets.getByName(n).CodeName: doc.Sheets.getByName(n)
+              for n in doc.Sheets.ElementNames}
+    calls = []
+    for module in sorted(CONTROLS):
+        sheet = sheets.get(module)
+        if sheet is None:
+            continue
+        page = sheet.DrawPage
+        for i in range(page.Count):
+            shape = page.getByIndex(i)
+            if shape.ShapeType != "com.sun.star.drawing.ControlShape":
+                continue
+            model = shape.Control
+            caption = str(getattr(model, "Label", "")).replace('"', '""')
+            point = 72.0 / 2540.0                      # 1/100 mm -> ポイント
+            calls.append(
+                f'    WBSGEN_AddButton {module}, "{shape.Name}", "{caption}", '
+                f'{shape.Position.X * point:.1f}, {shape.Position.Y * point:.1f}, '
+                f'{shape.Size.Width * point:.1f}, {shape.Size.Height * point:.1f}, '
+                f'{"False" if shape.Name in HIDDEN else "True"}')
+    code = (
+        "\n'--------------------------------------------------------\n"
+        "' wbsgen: ボタンが無ければ作る (ブックを開いたときに呼ぶ)\n"
+        "Private Sub WBSGEN_EnsureButtons()\n"
+        "    On Error Resume Next\n" + "\n".join(calls) + "\n"
+        "End Sub\n\n"
+        "Private Sub WBSGEN_AddButton(ws As Object, nm As String, cap As String, _\n"
+        "        l As Double, t As Double, w As Double, h As Double, vis As Boolean)\n"
+        "    Dim o As Object\n"
+        "    On Error Resume Next\n"
+        "    Set o = ws.OLEObjects(nm)\n"
+        "    If Not o Is Nothing Then Exit Sub\n"
+        "    Set o = ws.OLEObjects.Add(ClassType:=\"Forms.CommandButton.1\", _\n"
+        "        Left:=l, Top:=t, Width:=w, Height:=h)\n"
+        "    If o Is Nothing Then Exit Sub\n"
+        "    o.Name = nm\n"
+        "    o.Object.Caption = cap\n"
+        "    o.Object.TakeFocusOnClick = False\n"
+        "    o.Visible = vis\n"
+        "End Sub\n")
+    library = doc.BasicLibraries.getByName("VBAProject")
+    source = library.getByName("ThisWorkbook")
+    marker = "Private Sub Workbook_Open()"
+    if marker not in source or "WBSGEN_EnsureButtons" in source:
+        return
+    source = source.replace(marker, marker + "\n    Call WBSGEN_EnsureButtons", 1)
+    library.replaceByName("ThisWorkbook", source + code)
 
 
 def fill(doc, data):
