@@ -13,7 +13,9 @@ import json
 import os
 import shutil
 import subprocess
+import signal
 import tempfile
+import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -25,7 +27,7 @@ HERE = Path(__file__).parent
 TEMPLATE = HERE / "blank.xls"
 ADDIN = HERE / "km_module.xla"
 SCRIPT = HERE / "fill_uno.py"
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 420          # 無料枠など遅い環境では LibreOffice の起動だけで時間がかかる
 
 
 class KMError(Exception):
@@ -72,6 +74,14 @@ def _row(row) -> Dict[str, Any]:
     return out
 
 
+def _kill(child) -> None:
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        pass
+    child.wait()
+
+
 def build(spec, rows: List[Any], stem: str) -> bytes:
     """テンプレートに書き込んだ .xls と ``km_module.xla`` を zip にして返す。"""
     python, soffice = uno_python(), convert.office_command()
@@ -86,17 +96,25 @@ def build(spec, rows: List[Any], stem: str) -> bytes:
         # 祝祭日 (表示期間内)。設定シートの「休日設定(個別)」に書く
         "holidays": [d.isoformat() for d in spec.calendar().holidays_between(spec.start, spec.end)],
         "rows": [_row(row) for row in rows],
-        "port": 2100 + os.getpid() % 800,
+        "pipe": f"wbsgen_km_{uuid.uuid4().hex}",
     }
     with tempfile.TemporaryDirectory() as tmp:
         folder = Path(tmp)
         data_file, out = folder / "data.json", folder / "out.xls"
         data_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        # タイムアウトのときは LibreOffice ごと止める (居残って次の変換を邪魔しないように)
+        child = subprocess.Popen(
+            [python, "-I", str(SCRIPT), str(TEMPLATE), str(out), str(data_file)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
         try:
-            subprocess.run([python, "-I", str(SCRIPT), str(TEMPLATE), str(out), str(data_file)],
-                           check=True, capture_output=True, timeout=TIMEOUT_SECONDS)
-        except (subprocess.SubprocessError, OSError) as exc:
-            raise KMError(str(exc))
+            _, stderr = child.communicate(timeout=TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            _kill(child)
+            raise KMError(f"timeout ({TIMEOUT_SECONDS}s)")
+        _kill(child)                       # 正常でも、残った LibreOffice があれば片づける
+        if child.returncode != 0:
+            detail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()
+            raise KMError("; ".join(detail[-3:]) or f"exit {child.returncode}")
         if not out.exists():
             raise KMError("no output")
         book = out.read_bytes()
