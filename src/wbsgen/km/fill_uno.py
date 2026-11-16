@@ -106,6 +106,10 @@ def add_button_macro(doc):
         "    On Error Resume Next\n"
         "    Application.ScreenUpdating = False\n" + "\n".join(calls) + "\n"
         "    Application.ScreenUpdating = True\n"
+        "    ' チャートを設定 (表示単位・開始日など) どおりに描き直す (設定シートの「再描画」ボタンと同じ)\n"
+        "    Workbooks(\"km_module.xla\").Application.Run \"CMD_WorkSheetExec\", arg1:=34, arg2:=Null, _\n"
+        "        arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path\n"
+        "    Err.Clear\n"
         "    If Len(msg) > 0 Then\n"
         "        n = UBound(Split(msg, vbLf))\n"
         "        tmp = Environ(\"TEMP\")\n"
@@ -237,6 +241,10 @@ def fill(doc, data):
         settings.getCellByPosition(x, y).Value = serial(day)
     if data.get("start"):
         settings.getCellRangeByName("C16").Value = serial(data["start"])      # DEFC_Chart_StartDay
+    # 表示単位 (DEFC_Chart_Term = C22)。画面で選んだ単位に合わせる
+    term = {"day": "日単位", "week": "週単位", "month": "月単位"}.get(data.get("unit"))
+    if term:
+        settings.getCellRangeByName("C22").String = term
     if data.get("period_days"):
         settings.getCellRangeByName("C19").Value = data["period_days"]        # DEFC_Chart_Span
     doc.DocumentProperties.Title = data.get("title", "") or "開発マイルストーン"

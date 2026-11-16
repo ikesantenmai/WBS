@@ -940,3 +940,16 @@ def test_km_revision_number_is_not_newer_than_the_addin(client, monkeypatch, tmp
         major, _, minor = text.partition(".")
         return int(major) * 100 + int(minor or 0)
     assert 0 < revision(book) <= revision(addin)
+
+
+@needs_km
+@pytest.mark.parametrize("unit,term", [("day", "日単位"), ("week", "週単位"), ("month", "月単位")])
+def test_km_follows_the_chosen_unit(client, monkeypatch, tmp_path, unit, term):
+    monkeypatch.setenv("WBSGEN_KM", "1")
+    response = client.post("/api/build?format=xls", json={**SPEC, "unit": unit, "members": ["設計"]})
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        raw = zf.read(next(n for n in zf.namelist() if n.endswith(".xls")))
+    if not km_module.convert.available():
+        pytest.skip("LibreOffice が必要")
+    sheet = openpyxl.load_workbook(io.BytesIO(km_module.convert.to_xlsx(raw)))["設定"]
+    assert sheet["C22"].value == term
