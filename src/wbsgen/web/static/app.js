@@ -2014,8 +2014,8 @@ function storedMacroMode() {
 function macroOptions() {
   const options = [];
   if (language === 'ja') options.push(['xlsm', t('macro_on')]);
-  options.push(['xlsx', t('macro_off')], ['xls', t('macro_xls')]);
-  if (meta && meta.km && language === 'ja') options.push(['km', t('macro_km')]);   // 公開サイトでだけ
+  const withButtons = meta && meta.km && language === 'ja';   // 公開サイトでは .xls はボタン付き (zip)
+  options.push(['xlsx', t('macro_off')], ['xls', t(withButtons ? 'macro_km' : 'macro_xls')]);
   return options;
 }
 

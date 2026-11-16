@@ -889,3 +889,16 @@ def test_km_writes_the_holidays_into_the_settings_sheet(client, monkeypatch, tmp
     assert dt.date(2026, 4, 29) in days and dt.date(2026, 5, 5) in days   # 昭和の日・こどもの日
     assert dt.date(2027, 1, 1) in days                                    # 元日
     assert days == sorted(days)
+
+
+@needs_km
+def test_xls_has_the_buttons_on_a_km_site(client, monkeypatch):
+    """km が有効なサイトでは、日本語の「.xls」はボタン付き (zip)。英語は従来の .xls。"""
+    monkeypatch.setenv("WBSGEN_KM", "1")
+    spec = {**SPEC, "members": ["設計"]}
+    response = client.post("/api/build?format=xls", json=spec)
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        assert "km_module.xla" in zf.namelist()
+    english = client.post("/api/build?format=xls&lang=en", json={**spec, "language": "en"})
+    assert english.headers["content-type"] != "application/zip"

@@ -154,7 +154,7 @@ def build_workbook(
     language = _language(lang, payload)
     spec = _spec({**payload, "language": language}, language)
     choice = _choice(fmt, with_macro)
-    if choice == "km":
+    if _wants_km(choice, spec.language, legacy=False):
         return _km_response(spec, [], language)
     bundle = None if choice == "xlsx" else macro.bundled(spec.language)
     # .xls は、マクロ入りの .xlsm (または .xlsx) を作ってから変換する
@@ -356,7 +356,7 @@ async def export_workbook(
     language = normalize(lang)
     imported = await _read_upload(file, unit, language, edits)
     choice = _choice(fmt, with_macro)
-    if choice == "km":
+    if _wants_km(choice, imported.spec.language, legacy=imported.legacy):
         return _km_response(imported.spec, imported.rows, language)
     output = Output(imported, choice)
     with tempfile.TemporaryDirectory() as tmp:
@@ -389,6 +389,17 @@ async def number_workbook(
     except SpecError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"edits": numbered, "count": count}
+
+
+def _wants_km(choice: Optional[str], language: str, legacy: bool) -> bool:
+    """ボタン付きの .xls (km 形式) で返すか。
+
+    km が有効なサイトでは、日本語の「.xls」は ActiveX のボタン付きにする。旧形式で読み込んだ
+    ファイルは、そのファイル自身のボタンを引き継ぐので、ここには来ない。
+    """
+    if choice == "km":
+        return True
+    return choice == "xls" and language == "ja" and not legacy and km.enabled()
 
 
 def _km_response(spec: BlankWBS, rows, language: str) -> Response:
