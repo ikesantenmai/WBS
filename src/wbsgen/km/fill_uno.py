@@ -8,6 +8,7 @@
 import datetime
 import json
 import os
+import re
 import sys
 import time
 
@@ -99,6 +100,33 @@ def add_button_macro(doc):
                 f'{"False" if shape.Name in HIDDEN else "True"})')
     code = (
         "\n'--------------------------------------------------------\n"
+        "' wbsgen: ボタンからアドインの処理を呼ぶ。アドインが開いていなければ開き、呼べなかったら理由を表示する\n"
+        "Public Sub WBSGEN_RunAddin(cmd As String, no As Variant)\n"
+        "    Dim wb As Workbook, p As Variant, found As String, why As String\n"
+        "    On Error Resume Next\n"
+        "    Set wb = Workbooks(\"km_module.xla\")\n"
+        "    Err.Clear\n"
+        "    If wb Is Nothing Then\n"
+        "        For Each p In Array(Application.UserLibraryPath & \"\\km_module.xla\", _\n"
+        "                ThisWorkbook.Path & \"\\AddIns\\km_module.xla\", ThisWorkbook.Path & \"\\km_module.xla\")\n"
+        "            If Dir(p) <> \"\" Then found = p: Exit For\n"
+        "        Next p\n"
+        "        If Len(found) > 0 Then Set wb = Workbooks.Open(Filename:=found, ReadOnly:=False)\n"
+        "        If Err.Number <> 0 Then why = Err.Number & \" \" & Err.Description\n"
+        "        Err.Clear\n"
+        "        ThisWorkbook.Activate\n"
+        "    End If\n"
+        "    If wb Is Nothing Then\n"
+        "        MsgBox \"アドイン km_module.xla が開かれていません。\" & vbLf & _\n"
+        "            \"このブックと同じフォルダに km_module.xla を置き、(ダウンロードしたファイルは) ファイルの\" & vbLf & _\n"
+        "            \"プロパティで「ブロックの解除」をしてから、このブックを開き直してください。\" & vbLf & why, vbExclamation, \"wbsgen\"\n"
+        "        Exit Sub\n"
+        "    End If\n"
+        "    Application.Run \"'\" & wb.Name & \"'!\" & cmd, no, Null, ThisWorkbook.Name, ThisWorkbook.Path\n"
+        "    If Err.Number <> 0 Then\n"
+        "        MsgBox \"アドインの処理でエラーになりました: \" & Err.Number & \" \" & Err.Description, vbExclamation, \"wbsgen\"\n"
+        "    End If\n"
+        "End Sub\n\n"
         "' wbsgen: ActiveX ボタンが無ければ作る。ブックの読み込みが終わってから呼ぶ (OnTime)。\n"
         "' 作れないときは、ActiveX の一時ファイル (MSForms.exd) の破損が多いので、その直し方を表示する\n"
         "Public Sub WBSGEN_EnsureButtons()\n"
@@ -181,6 +209,17 @@ def add_button_macro(doc):
     library.replaceByName("ThisWorkbook", source + code)
 
 
+#: ボタンから、アドインを呼ぶ行 (イベント処理の行は対象外)。呼べなかった理由を表示するために、
+#: ThisWorkbook.WBSGEN_RunAddin 経由にする。元の行は、エラーを黙って捨てるので原因が分からない
+BUTTON_CALL = re.compile(
+    r'(?m)^([ \t]*)Workbooks\(cnsADDIN\)\.Application\.Run \(("CMD_WorkSheetExec"|cmd)\), '
+    r'arg1:=(arg|no|99|64|65), arg2:=Null, arg3:=ThisWorkbook\.Name, arg4:=ThisWorkbook\.Path[ \t]*$')
+
+
+def redirect_button_calls(code):
+    return BUTTON_CALL.sub(r"\1ThisWorkbook.WBSGEN_RunAddin \2, \3", code)
+
+
 def restore_vba(doc, folder):
     """シートとブックのコードを、元のテンプレートの VBA そのままに戻す。
 
@@ -195,6 +234,7 @@ def restore_vba(doc, folder):
         if library.hasByName(name) and os.path.exists(path):
             with open(path, encoding="utf-8") as handle:
                 code = handle.read()
+            code = redirect_button_calls(code)
             library.replaceByName(name, header + code)
 
 

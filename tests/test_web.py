@@ -923,6 +923,9 @@ def test_km_buttons_are_made_by_a_macro_when_the_book_opens(client, monkeypatch,
     assert not any("removed unmatched" in text for text in code.values())
     assert sum(text.count("_Click()") for name, text in code.items() if name.startswith("Sheet")) == 22
     assert "OLEObjects.Add" in book and "MSForms.exd" in book           # ActiveX。作れないときの案内つき
+    # ボタンからアドインを呼ぶ処理は、呼べなかった理由を表示する経路を通る (元は黙って捨てていた)
+    assert "Public Sub WBSGEN_RunAddin" in book
+    assert 'ThisWorkbook.WBSGEN_RunAddin "CMD_WorkSheetExec", arg' in code["Sheet1.cls"]
     assert not any("VB_Control" in text for text in code.values())       # 宣言とボタンの食い違いを作らない
 
 
