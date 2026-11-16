@@ -915,7 +915,8 @@ def test_km_buttons_are_made_by_a_macro_when_the_book_opens(client, monkeypatch,
         path.write_bytes(zf.read(next(n for n in zf.namelist() if n.endswith(".xls"))))
     code = {name: text for _, _, name, text in oletools.VBA_Parser(str(path)).extract_macros()}
     book = code["ThisWorkbook.cls"]
-    assert "Call WBSGEN_EnsureButtons" in book
+    assert 'OnTime Now + TimeSerial(0, 0, 3), "ThisWorkbook.WBSGEN_EnsureButtons"' in book
+    assert "Public Sub WBSGEN_EnsureButtons" in book
     assert book.count("WBSGEN_AddButton(Sheet") == 22
     assert 'WBSGEN_AddButton(Sheet1, "BTN_MenuWndDisp", "メニュー"' in book
     assert not any("VB_Control" in text for text in code.values())       # 宣言とボタンの食い違いを作らない
