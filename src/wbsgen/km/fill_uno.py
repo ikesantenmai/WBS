@@ -23,22 +23,8 @@ COLUMNS = [("group", 1), ("subgroup", 2), ("no", 3), ("name", 4), ("start", 5),
            ("predecessor", 14), ("member", 16), ("status", 17)]
 DATES = {"start", "end", "actual_start", "actual_end"}
 
-#: シートのコード (VBA) に書かれる、ActiveX ボタンの宣言 ("名前, 図形の番号, 順番, 種類")。
-#: LibreOffice はこの宣言を保存時に落とすので、書き足す。Excel はこれでボタンと名前を結び付ける
-#: (無いとボタンが出ない)。番号は、元のテンプレートの図形の番号と同じ。
-CONTROLS = {
-    "Sheet1": ["BTN_SortEx1Disp, 1, 0", "BTN_SortEx2Disp, 2, 1", "BTN_SortAllDisp, 3, 2",
-               "BTN_MenuWndDisp, 4, 3", "BTN_TodoAllDisp, 21503, 4", "BTN_TaskWndDisp, 1887, 5"],
-    "Sheet2": ["BTN_MemberList_Get, 1, 0", "BTN_MemberList_FilePut, 49, 1",
-               "BTN_MemberList_FileGet, 50, 2", "BTN_MemberList_AddGet, 159, 3",
-               "BTN_MemberList_FilePutMem, 319, 4"],
-    "Sheet3": ["BTN_Config_Rewrite, 8, 7", "BTN_Config_DataShift, 46, 10",
-               "BTN_Config_AllDataDel, 714, 11", "BTN_Config_Template1Set, 196, 12",
-               "BTN_Config_Template2Set, 197, 13", "BTN_Config_Template1Get, 247, 14",
-               "BTN_Config_Template2Get, 248, 15", "BTN_Config_BackPictGet, 307, 16",
-               "BTN_Config_Repair, 536, 17"],
-    "Sheet4": ["BTN_BaseProcess_FilePut, 1, 0", "BTN_BaseProcess_FileGet, 2, 1"],
-}
+#: ボタンのあるシートのコード名 (ボタンはマクロで作る。add_button_macro)
+CONTROL_MODULES = ["Sheet1", "Sheet2", "Sheet3", "Sheet4"]
 
 
 def prop(name, value):
@@ -71,23 +57,11 @@ def main(template, out, data_file):
         "file://" + template, "_blank", 0, (prop("Hidden", True),))
     try:
         fill(doc, data)
-        declare_controls(doc)
         add_button_macro(doc)
+        remove_controls(doc)
         doc.storeToURL("file://" + out, (prop("FilterName", "MS Excel 97"),))
     finally:
         doc.close(True)
-
-
-def declare_controls(doc):
-    """各シートのコードの先頭に、ActiveX ボタンの宣言 (Attribute VB_Control) を書き足す。"""
-    library = doc.BasicLibraries.getByName("VBAProject")
-    for module, controls in CONTROLS.items():
-        if not library.hasByName(module):
-            continue
-        source = library.getByName(module)
-        lines = "".join(f'Attribute VB_Control = "{c}, MSForms, CommandButton"\n' for c in controls)
-        if "VB_Control" not in source:
-            library.replaceByName(module, lines + source)
 
 
 #: 元のテンプレートで、最初は非表示のボタン (抽出ボタン)。残りは表示
@@ -104,7 +78,7 @@ def add_button_macro(doc):
     sheets = {doc.Sheets.getByName(n).CodeName: doc.Sheets.getByName(n)
               for n in doc.Sheets.ElementNames}
     calls = []
-    for module in sorted(CONTROLS):
+    for module in CONTROL_MODULES:
         sheet = sheets.get(module)
         if sheet is None:
             continue
@@ -148,6 +122,17 @@ def add_button_macro(doc):
         return
     source = source.replace(marker, marker + "\n    Call WBSGEN_EnsureButtons", 1)
     library.replaceByName("ThisWorkbook", source + code)
+
+
+def remove_controls(doc):
+    """ファイルの中のボタンは外す。LibreOffice が書くボタンは Excel と食い違い、エラー
+    (32809) や表示されない原因になる。ボタンは、開いたときのマクロが作る。"""
+    for name in doc.Sheets.ElementNames:
+        page = doc.Sheets.getByName(name).DrawPage
+        dead = [page.getByIndex(i) for i in range(page.Count)
+                if page.getByIndex(i).ShapeType == "com.sun.star.drawing.ControlShape"]
+        for shape in dead:
+            page.remove(shape)
 
 
 def fill(doc, data):

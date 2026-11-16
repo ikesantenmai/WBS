@@ -905,22 +905,17 @@ def test_xls_has_the_buttons_on_a_km_site(client, monkeypatch):
 
 
 @needs_km
-def test_km_sheet_code_declares_the_buttons(client, monkeypatch, tmp_path):
-    """Excel が ActiveX ボタンを名前と結び付けられるよう、シートのコードに宣言が残っている。"""
+def test_km_buttons_are_made_by_a_macro_when_the_book_opens(client, monkeypatch, tmp_path):
+    """ボタンは、ブックを開いたときのマクロが作る (ファイル内のボタンは Excel と食い違うので入れない)。"""
     oletools = pytest.importorskip("oletools.olevba")
     monkeypatch.setenv("WBSGEN_KM", "1")
     response = client.post("/api/build?format=xls", json={**SPEC, "members": ["設計"]})
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
         path = tmp_path / "km.xls"
         path.write_bytes(zf.read(next(n for n in zf.namelist() if n.endswith(".xls"))))
-    declared = {}
-    for _, _, name, code in oletools.VBA_Parser(str(path)).extract_macros():
-        declared[name] = [line for line in code.splitlines() if "VB_Control" in line]
-    assert len(declared["Sheet1.cls"]) == 6 and len(declared["Sheet3.cls"]) == 9
-    assert any("BTN_MenuWndDisp, 4, 3" in line for line in declared["Sheet1.cls"])
-    # ブックを開いたとき、足りないボタンを作るマクロも入っている
-    code = {name: code for _, _, name, code in oletools.VBA_Parser(str(path)).extract_macros()}
+    code = {name: text for _, _, name, text in oletools.VBA_Parser(str(path)).extract_macros()}
     book = code["ThisWorkbook.cls"]
     assert "Call WBSGEN_EnsureButtons" in book
     assert book.count("WBSGEN_AddButton Sheet") == 22
     assert 'WBSGEN_AddButton Sheet1, "BTN_MenuWndDisp", "メニュー"' in book
+    assert not any("VB_Control" in text for text in code.values())       # 宣言とボタンの食い違いを作らない
