@@ -8,6 +8,7 @@
 import datetime
 import json
 import os
+import re
 import sys
 import time
 
@@ -99,14 +100,12 @@ def add_button_macro(doc):
                 f'{"False" if shape.Name in HIDDEN else "True"})')
     code = (
         "\n'--------------------------------------------------------\n"
-        "' wbsgen: ボタンが無ければ作る。ブックの読み込みが終わってから呼ぶ (OnTime)。\n"
-        "' 作れなかったときは理由を表示する\n"
+        "' wbsgen: ボタン (フォームコントロール) が無ければ作る。ブックの読み込みが終わってから呼ぶ (OnTime)。\n"
+        "' クリックすると、各シートの BTN_*_Click が動く。作れなかったときは理由を表示する\n"
         "Public Sub WBSGEN_EnsureButtons()\n"
-        "    Dim msg As String, n As Integer, keep As Object, r As String\n"
+        "    Dim msg As String, n As Integer\n"
         "    On Error Resume Next\n"
-        "    Set keep = ActiveSheet\n"
         "    Application.ScreenUpdating = False\n" + "\n".join(calls) + "\n"
-        "    keep.Activate\n"
         "    Application.ScreenUpdating = True\n"
         "    On Error GoTo 0\n"
         "    If Len(msg) > 0 Then\n"
@@ -116,29 +115,21 @@ def add_button_macro(doc):
         "End Sub\n\n"
         "Private Function WBSGEN_AddButton(ws As Object, nm As String, cap As String, _\n"
         "        l As Double, t As Double, w As Double, h As Double, vis As Boolean) As String\n"
-        "    Dim o As Object, i As Integer\n"
+        "    Dim s As Object\n"
         "    On Error Resume Next\n"
-        "    Set o = ws.OLEObjects(nm)\n"
+        "    Set s = ws.Shapes(nm)\n"
         "    Err.Clear\n"
-        "    If Not o Is Nothing Then Exit Function\n"
-        "    ws.Activate                         ' 表示中のシートでないと挿入できないことがある\n"
-        "    For i = 1 To 2\n"
-        "        Err.Clear\n"
-        "        Set o = Nothing\n"
-        "        Set o = ws.OLEObjects.Add(ClassType:=\"Forms.CommandButton.1\", _\n"
-        "            Left:=l, Top:=t, Width:=w, Height:=h)\n"
-        "        If Err.Number = 0 And Not o Is Nothing Then Exit For\n"
-        "        DoEvents\n"
-        "    Next i\n"
-        "    If o Is Nothing Then\n"
+        "    If Not s Is Nothing Then Exit Function\n"
+        "    Set s = ws.Shapes.AddFormControl(-4143, l, t, w, h)     ' xlButtonControl\n"
+        "    If Err.Number <> 0 Or s Is Nothing Then\n"
         "        WBSGEN_AddButton = ws.Name & \" / \" & nm & \": \" & Err.Number & \" \" & Err.Description & vbLf\n"
         "        Exit Function\n"
         "    End If\n"
         "    Err.Clear\n"
-        "    o.Name = nm\n"
-        "    o.Object.Caption = cap\n"
-        "    o.Object.TakeFocusOnClick = False\n"
-        "    o.Visible = vis\n"
+        "    s.Name = nm\n"
+        "    s.OnAction = \"'\" & ThisWorkbook.Name & \"'!\" & ws.CodeName & \".\" & nm & \"_Click\"\n"
+        "    s.TextFrame.Characters.Text = cap\n"
+        "    s.Visible = vis\n"
         "End Function\n")
     library = doc.BasicLibraries.getByName("VBAProject")
     source = library.getByName("ThisWorkbook")
@@ -163,7 +154,10 @@ def restore_vba(doc, folder):
         path = os.path.join(folder, name + ".txt")
         if library.hasByName(name) and os.path.exists(path):
             with open(path, encoding="utf-8") as handle:
-                library.replaceByName(name, header + handle.read())
+                code = handle.read()
+            # フォームコントロールのボタンは、マクロ名で呼ぶので、クリック処理を Public にする
+            code = re.sub(r"(?m)^Private Sub (BTN_\w+_Click)", r"Public Sub \1", code)
+            library.replaceByName(name, header + code)
 
 
 def remove_controls(doc):

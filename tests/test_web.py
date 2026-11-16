@@ -922,6 +922,8 @@ def test_km_buttons_are_made_by_a_macro_when_the_book_opens(client, monkeypatch,
     # LibreOffice は 1 行形式の Sub をコメントアウトしてしまう。元のコードに戻してある
     assert not any("removed unmatched" in text for text in code.values())
     assert sum(text.count("_Click()") for name, text in code.items() if name.startswith("Sheet")) == 22
+    assert "AddFormControl" in book                                      # ActiveX ではなくフォームコントロール
+    assert "Public Sub BTN_MenuWndDisp_Click" in code["Sheet1.cls"]      # マクロ名で呼べるように
     assert not any("VB_Control" in text for text in code.values())       # 宣言とボタンの食い違いを作らない
 
 
