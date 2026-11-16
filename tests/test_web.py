@@ -902,3 +902,19 @@ def test_xls_has_the_buttons_on_a_km_site(client, monkeypatch):
         assert "km_module.xla" in zf.namelist()
     english = client.post("/api/build?format=xls&lang=en", json={**spec, "language": "en"})
     assert english.headers["content-type"] != "application/zip"
+
+
+@needs_km
+def test_km_sheet_code_declares_the_buttons(client, monkeypatch, tmp_path):
+    """Excel が ActiveX ボタンを名前と結び付けられるよう、シートのコードに宣言が残っている。"""
+    oletools = pytest.importorskip("oletools.olevba")
+    monkeypatch.setenv("WBSGEN_KM", "1")
+    response = client.post("/api/build?format=xls", json={**SPEC, "members": ["設計"]})
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        path = tmp_path / "km.xls"
+        path.write_bytes(zf.read(next(n for n in zf.namelist() if n.endswith(".xls"))))
+    declared = {}
+    for _, _, name, code in oletools.VBA_Parser(str(path)).extract_macros():
+        declared[name] = [line for line in code.splitlines() if "VB_Control" in line]
+    assert len(declared["Sheet1.cls"]) == 6 and len(declared["Sheet3.cls"]) == 9
+    assert any("BTN_MenuWndDisp, 4, 3" in line for line in declared["Sheet1.cls"])
