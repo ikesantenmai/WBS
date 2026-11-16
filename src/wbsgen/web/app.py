@@ -428,6 +428,13 @@ def _finish(output: "Output", data: bytes, language: str) -> bytes:
                             detail=message(language, "xls_failed", reason=exc))
 
 
+@app.on_event("startup")
+def _warm_up() -> None:
+    """km 形式が有効なら、LibreOffice を先に起動しておく (別スレッド)。"""
+    import threading
+    threading.Thread(target=km.warm, daemon=True).start()
+
+
 @app.middleware("http")
 async def no_store_api(request, call_next):
     """API の結果はブラウザに保存させない (古い答えが画面に残らないように)。"""

@@ -9,13 +9,15 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import shutil
 import subprocess
 import signal
 import tempfile
-import uuid
+import threading
+import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +30,41 @@ TEMPLATE = HERE / "blank.xls"
 ADDIN = HERE / "km_module.xla"
 SCRIPT = HERE / "fill_uno.py"
 TIMEOUT_SECONDS = 420          # 無料枠など遅い環境では LibreOffice の起動だけで時間がかかる
+
+
+PIPE = f"wbsgen_km_{os.getpid()}"
+_lock = threading.Lock()
+_office: Optional[subprocess.Popen] = None
+
+
+def _stop_office() -> None:
+    global _office
+    if _office is not None:
+        _kill(_office)
+        _office = None
+
+
+def _ensure_office(soffice: str) -> None:
+    """LibreOffice を常駐させる (呼び出しのたびに起動すると、遅い環境で時間切れになる)。"""
+    global _office
+    if _office is not None and _office.poll() is None:
+        return
+    profile = Path(tempfile.gettempdir()) / f"wbsgen_km_profile_{os.getpid()}"
+    _office = subprocess.Popen(
+        [soffice, "--headless", "--norestore", "--nologo",
+         f"--accept=pipe,name={PIPE};urp;", f"-env:UserInstallation=file://{profile}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def warm() -> None:
+    """サーバーの起動時に呼ぶ。最初のダウンロードを待たせないよう、先に LibreOffice を起動しておく。"""
+    soffice = convert.office_command()
+    if enabled() and soffice:
+        with _lock:
+            _ensure_office(soffice)
+
+
+atexit.register(lambda: _stop_office())
 
 
 class KMError(Exception):
@@ -96,13 +133,13 @@ def build(spec, rows: List[Any], stem: str) -> bytes:
         # 祝祭日 (表示期間内)。設定シートの「休日設定(個別)」に書く
         "holidays": [d.isoformat() for d in spec.calendar().holidays_between(spec.start, spec.end)],
         "rows": [_row(row) for row in rows],
-        "pipe": f"wbsgen_km_{uuid.uuid4().hex}",
+        "pipe": PIPE,
     }
-    with tempfile.TemporaryDirectory() as tmp:
+    with _lock, tempfile.TemporaryDirectory() as tmp:       # 同時に 1 件ずつ (メモリを抑える)
         folder = Path(tmp)
         data_file, out = folder / "data.json", folder / "out.xls"
         data_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        # タイムアウトのときは LibreOffice ごと止める (居残って次の変換を邪魔しないように)
+        _ensure_office(soffice)
         child = subprocess.Popen(
             [python, "-I", str(SCRIPT), str(TEMPLATE), str(out), str(data_file)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
@@ -110,9 +147,10 @@ def build(spec, rows: List[Any], stem: str) -> bytes:
             _, stderr = child.communicate(timeout=TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             _kill(child)
+            _stop_office()                 # 固まった LibreOffice は捨てて、次は起動し直す
             raise KMError(f"timeout ({TIMEOUT_SECONDS}s)")
-        _kill(child)                       # 正常でも、残った LibreOffice があれば片づける
         if child.returncode != 0:
+            _stop_office()
             detail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()
             raise KMError("; ".join(detail[-3:]) or f"exit {child.returncode}")
         if not out.exists():

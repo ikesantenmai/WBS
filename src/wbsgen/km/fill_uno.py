@@ -7,9 +7,7 @@
 
 import datetime
 import json
-import subprocess
 import sys
-import tempfile
 import time
 
 import uno
@@ -38,42 +36,27 @@ def serial(text):
 
 def main(template, out, data_file):
     data = json.load(open(data_file, encoding="utf-8"))
-    profile = tempfile.mkdtemp(prefix="km_profile_")
-    pipe = data["pipe"]          # 同時に動く別の変換と混ざらないよう、毎回ちがう名前
-    proc = subprocess.Popen(
-        [data["soffice"], "--headless", "--norestore", "--nologo",
-         f"--accept=pipe,name={pipe};urp;",
-         f"-env:UserInstallation=file://{profile}"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        ctx = None
-        for _ in range(300):
-            try:
-                local = uno.getComponentContext()
-                resolver = local.ServiceManager.createInstanceWithContext(
-                    "com.sun.star.bridge.UnoUrlResolver", local)
-                ctx = resolver.resolve(
-                    f"uno:pipe,name={pipe};urp;StarOffice.ComponentContext")
-                break
-            except Exception:
-                time.sleep(1)
-        if ctx is None:
-            raise SystemExit("LibreOffice に接続できません (起動が間に合いませんでした)")
-        desktop = ctx.ServiceManager.createInstanceWithContext(
-            "com.sun.star.frame.Desktop", ctx)
-        doc = desktop.loadComponentFromURL(
-            "file://" + template, "_blank", 0, (prop("Hidden", True),))
+    pipe = data["pipe"]          # wbsgen 本体が常駐させている LibreOffice の接続口
+    ctx = None
+    for _ in range(300):         # 起動直後は、つながるまで待つ
         try:
-            fill(doc, data)
-            doc.storeToURL("file://" + out, (prop("FilterName", "MS Excel 97"),))
-        finally:
-            doc.close(True)
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(10)
+            local = uno.getComponentContext()
+            resolver = local.ServiceManager.createInstanceWithContext(
+                "com.sun.star.bridge.UnoUrlResolver", local)
+            ctx = resolver.resolve(f"uno:pipe,name={pipe};urp;StarOffice.ComponentContext")
+            break
         except Exception:
-            proc.kill()
+            time.sleep(1)
+    if ctx is None:
+        raise SystemExit("LibreOffice に接続できません (起動が間に合いませんでした)")
+    desktop = ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+    doc = desktop.loadComponentFromURL(
+        "file://" + template, "_blank", 0, (prop("Hidden", True),))
+    try:
+        fill(doc, data)
+        doc.storeToURL("file://" + out, (prop("FilterName", "MS Excel 97"),))
+    finally:
+        doc.close(True)
 
 
 def fill(doc, data):
