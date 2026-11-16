@@ -1,0 +1,13 @@
+Option Explicit
+Private Const cnsADDIN = "km_module.xla"   ' アドインファイル名
+Private Sub BTN_BaseProcess_FilePut_Click()
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=64, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub
+
+Private Sub BTN_BaseProcess_FileGet_Click()
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=65, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub

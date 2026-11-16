@@ -1,0 +1,48 @@
+Option Explicit
+Private Const cnsADDIN = "km_module.xla"   ' アドインファイル名
+Private ExecuteFlag As Boolean
+'--------------------------------------------------------
+' セル変更によるイベント
+'--------------------------------------------------------
+Private Sub Worksheet_Change(ByVal Target As Range)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=12, arg2:=Target.Address, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Sub
+'--------------------------------------------------------
+' ダブルクリックによるイベント
+'--------------------------------------------------------
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=15, arg2:=Target.Address, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Sub
+Private Function ButtonClickFunc2(no As Integer)
+    ExecuteFlag = True
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=no, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+    ExecuteFlag = False
+End Function
+Private Sub BTN_Config_Rewrite_Click():      Call ButtonClickFunc2(34): End Sub
+Private Sub BTN_Config_DataShift_Click():    Call ButtonClickFunc2(71): End Sub
+Private Sub BTN_Config_AllDataDel_Click():   Call ButtonClickFunc2(76): End Sub
+Private Sub BTN_Config_Template1Set_Click(): Call ButtonClickFunc2(72): End Sub
+Private Sub BTN_Config_Template2Set_Click(): Call ButtonClickFunc2(73): End Sub
+Private Sub BTN_Config_Template1Get_Click(): Call ButtonClickFunc2(74): End Sub
+Private Sub BTN_Config_Template2Get_Click(): Call ButtonClickFunc2(75): End Sub
+Private Sub BTN_Config_BackPictGet_Click():  Call ButtonClickFunc2(66): End Sub
+Private Sub BTN_Config_Repair_Click()
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=99, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub
+

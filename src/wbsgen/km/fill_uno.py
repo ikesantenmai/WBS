@@ -7,6 +7,7 @@
 
 import datetime
 import json
+import os
 import sys
 import time
 
@@ -37,7 +38,7 @@ def serial(text):
     return (datetime.date.fromisoformat(text) - EPOCH).days
 
 
-def main(template, out, data_file):
+def main(template, out, data_file, vba_dir):
     data = json.load(open(data_file, encoding="utf-8"))
     pipe = data["pipe"]          # wbsgen 本体が常駐させている LibreOffice の接続口
     ctx = None
@@ -57,6 +58,7 @@ def main(template, out, data_file):
         "file://" + template, "_blank", 0, (prop("Hidden", True),))
     try:
         fill(doc, data)
+        restore_vba(doc, vba_dir)
         add_button_macro(doc)
         remove_controls(doc)
         doc.storeToURL("file://" + out, (prop("FilterName", "MS Excel 97"),))
@@ -148,6 +150,22 @@ def add_button_macro(doc):
     library.replaceByName("ThisWorkbook", source + code)
 
 
+def restore_vba(doc, folder):
+    """シートとブックのコードを、元のテンプレートの VBA そのままに戻す。
+
+    LibreOffice は読み込んだコードを書き換える (「Private Sub X_Click(): ...: End Sub」のような
+    1 行の処理を、`Rem removed unmatched Sub/End` でコメントアウトしてしまう)。ボタンの
+    クリック処理が消えるので、元のコードで置き換える。
+    """
+    library = doc.BasicLibraries.getByName("VBAProject")
+    header = "Rem Attribute VBA_ModuleType=VBADocumentModule\nOption VBASupport 1\n"
+    for name in CONTROL_MODULES + ["ThisWorkbook"]:
+        path = os.path.join(folder, name + ".txt")
+        if library.hasByName(name) and os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                library.replaceByName(name, header + handle.read())
+
+
 def remove_controls(doc):
     """ファイルの中のボタンは外す。LibreOffice が書くボタンは Excel と食い違い、エラー
     (32809) や表示されない原因になる。ボタンは、開いたときのマクロが作る。"""
@@ -200,4 +218,4 @@ def fill(doc, data):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])

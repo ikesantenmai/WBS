@@ -1,0 +1,167 @@
+Option Explicit
+Private Const cnsADDIN = "km_module.xla"   ' アドインファイル名
+Private sheet_name As String
+'--------------------------------------------------------
+' Workbookオープンイベント
+'--------------------------------------------------------
+Private Sub Workbook_Open()
+    
+    Dim AddinFilePath As String
+    Dim ConfigFilePath As String
+
+    Call GetSheetName
+    
+    On Error GoTo Exec_AddinError1
+    ' 初期処理マクロの起動(引数は本ブック名)
+    If Exec_Addin = False Then GoTo Exec_AddinProc
+    
+    Worksheets(sheet_name).SettingButton
+    
+    Exit Sub
+
+'-------------------------------------------------------------------------------
+' アドインが開かれていない時の処理
+Exec_AddinProc:
+    
+    ' アドインの存在確認(ライブラリパス)
+    AddinFilePath = Application.UserLibraryPath & "\" & cnsADDIN
+    If Dir(AddinFilePath, vbNormal) = "" Then
+        ' アドインの存在確認(ワークブックAddIns配下のフォルダ)
+        AddinFilePath = ThisWorkbook.Path & "\AddIns\" & cnsADDIN
+        If Dir(AddinFilePath, vbNormal) = "" Then
+            ' アドインの存在確認(ワークブックと同じフォルダ)
+            AddinFilePath = ThisWorkbook.Path & "\" & cnsADDIN
+            If Dir(AddinFilePath, vbNormal) = "" Then
+                Call MsgBox("[" + cnsADDIN + "]がありません", vbInformation)
+                Call DispAllButton(False)
+                Exit Sub
+            End If
+        End If
+    End If
+    
+    ' アドインを開く
+    Application.Workbooks.Open Filename:=AddinFilePath, ReadOnly:=False
+   
+    If CheckVersion <> 0 Then
+        Workbooks(cnsADDIN).Close
+        Call DispAllButton(False)
+        Exit Sub
+    End If
+    
+    If Exec_Addin = False Then GoTo Exec_AddinError1
+
+    Worksheets(sheet_name).SettingButton
+    
+    ' 自ブックをフォアに戻す
+    ThisWorkbook.Activate
+    'Resume
+    Exit Sub
+
+'-------------------------------------------------------------------------------
+' アドインが開けなかった時の処理
+Exec_AddinError1:
+    Call MsgBox("[" + cnsADDIN + "]のオープンに失敗しました" & vbCr & Err.Description, vbCritical)
+    Call DispAllButton(False)
+End Sub
+'--------------------------------------------------------
+' アドイン実行処理
+'--------------------------------------------------------
+Private Function Exec_Addin() As Boolean
+    On Error GoTo Exec_Addin_Err
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=1, arg2:=True, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    If CheckVersion <> 0 Then
+        Workbooks(cnsADDIN).Close
+        Call DispAllButton(False)
+    End If
+    Exec_Addin = True
+    Exit Function
+
+Exec_Addin_Err:
+    'Call MsgBox(Err.Description)
+    Exec_Addin = False
+End Function
+'--------------------------------------------------------
+' Workbookクローズ前イベント
+'--------------------------------------------------------
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=2, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub
+'--------------------------------------------------------
+' Workbook保存前イベント
+'--------------------------------------------------------
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=3, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub
+'--------------------------------------------------------
+' Workbookアクティブイベント
+'--------------------------------------------------------
+Private Sub Workbook_Activate()
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=4, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub
+'--------------------------------------------------------
+' Workbook非アクティブイベント
+'--------------------------------------------------------
+Private Sub Workbook_Deactivate()
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=5, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+End Sub
+'--------------------------------------------------------
+' ボタン表示切替
+'--------------------------------------------------------
+Private Sub DispAllButton(flg As Boolean)
+    On Error Resume Next
+    Application.ScreenUpdating = False
+    With Worksheets(sheet_name)
+        .OLEObjects("BTN_MenuWndDisp").Visible = flg
+        .OLEObjects("BTN_TodoAllDisp").Visible = flg
+        .OLEObjects("BTN_SortAllDisp").Visible = flg
+        .OLEObjects("BTN_SortEx1Disp").Visible = flg
+        .OLEObjects("BTN_SortEx2Disp").Visible = flg
+        .OLEObjects("BTN_TaskWndDisp").Visible = flg
+    End With
+    On Error GoTo 0
+    Application.ScreenUpdating = True
+End Sub
+'--------------------------------------------------------
+' シート名取得
+'--------------------------------------------------------
+Private Sub GetSheetName()
+    Dim i As Integer
+    For i = 1 To Worksheets.Count
+        On Error Resume Next
+        If Worksheets(i).Range("A1").Name.Name = "DEFW" Then
+            sheet_name = Worksheets(i).Name
+            Exit For
+        End If
+        On Error GoTo 0
+    Next i
+End Sub
+'--------------------------------------------------------
+' バージョンチェック
+'--------------------------------------------------------
+Private Function CheckVersion() As Integer
+    Dim str1 As String, str2 As String
+    Dim arr1 As Variant, arr2 As Variant
+    Dim ver1 As Long, ver2 As Long
+    str1 = ThisWorkbook.BuiltinDocumentProperties.Item("Revision number")
+    str2 = Workbooks(cnsADDIN).BuiltinDocumentProperties.Item("Revision number")
+    arr1 = Split(str1, ".")
+    arr2 = Split(str2, ".")
+    If UBound(arr1) >= 0 Then ver1 = arr1(0) * 100
+    If UBound(arr1) >= 1 Then ver1 = ver1 + arr1(1)
+    If UBound(arr2) >= 0 Then ver2 = arr2(0) * 100
+    If UBound(arr2) >= 1 Then ver2 = ver2 + arr2(1)
+    If ver1 > ver2 Or ver2 <= 0 Then
+        Call MsgBox("マクロのバージョンが古いため、利用できません。" & vbCr & vbCr & "　[" & ThisWorkbook.Name & "] ⇒ Version " & str1 & vbCr & "　[" & cnsADDIN & "] ⇒ Version " & str2, vbInformation)
+        CheckVersion = 1
+    Else
+        CheckVersion = 0
+    End If
+End Function

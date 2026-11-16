@@ -1,0 +1,55 @@
+Option Explicit
+Private Const cnsADDIN = "km_module.xla"   ' アドインファイル名
+Private ExecuteFlag As Boolean
+'--------------------------------------------------------
+' セル変更によるイベント
+'--------------------------------------------------------
+Private Sub Worksheet_Change(ByVal Target As Range)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=13, arg2:=Target.Address, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Sub
+'--------------------------------------------------------
+' ダブルクリックによるイベント
+'--------------------------------------------------------
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=16, arg2:=Target.Address, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Sub
+'--------------------------------------------------------
+' ボタンクリック時の処理
+'--------------------------------------------------------
+Private Function ButtonClickFunc(cmd As String, no As Integer)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        Workbooks(cnsADDIN).Application.Run (cmd), arg1:=no, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Function
+Private Sub BTN_MemberList_Get_Click()
+    Call ButtonClickFunc("CMD_WorkSheetExec", 61)
+End Sub
+Private Sub BTN_MemberList_FilePut_Click()
+    Call ButtonClickFunc("CMD_WorkSheetExec", 62)
+End Sub
+Private Sub BTN_MemberList_FileGet_Click()
+    Call ButtonClickFunc("CMD_WorkSheetExec", 63)
+End Sub
+Private Sub BTN_MemberList_AddGet_Click()
+    Call ButtonClickFunc("CMD_WorkSheetExec", 68)
+End Sub
+Private Sub BTN_MemberList_FilePutMem_Click()
+    Call ButtonClickFunc("CMD_WorkSheetExec", 69)
+End Sub
+

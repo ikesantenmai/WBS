@@ -29,6 +29,7 @@ HERE = Path(__file__).parent
 TEMPLATE = HERE / "blank.xls"
 ADDIN = HERE / "km_module.xla"
 SCRIPT = HERE / "fill_uno.py"
+VBA_DIR = HERE / "vba"
 TIMEOUT_SECONDS = 420          # 無料枠など遅い環境では LibreOffice の起動だけで時間がかかる
 
 
@@ -141,7 +142,7 @@ def build(spec, rows: List[Any], stem: str) -> bytes:
         data_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         _ensure_office(soffice)
         child = subprocess.Popen(
-            [python, "-I", str(SCRIPT), str(TEMPLATE), str(out), str(data_file)],
+            [python, "-I", str(SCRIPT), str(TEMPLATE), str(out), str(data_file), str(VBA_DIR)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
         try:
             _, stderr = child.communicate(timeout=TIMEOUT_SECONDS)

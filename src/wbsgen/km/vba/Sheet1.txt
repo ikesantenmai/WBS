@@ -1,0 +1,89 @@
+Option Explicit
+Private Const cnsADDIN = "km_module.xla"   ' アドインファイル名
+Private ExecuteFlag As Boolean
+Private EventOpeFlag As Boolean
+'--------------------------------------------------------
+Private WithEvents cmdBtn_Event_CellInsert As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_RawInsert As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_ColInsert As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_RawInsert2 As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_ColInsert2 As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_CellDelete As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_RawDelete As Office.CommandBarButton
+Private WithEvents cmdBtn_Event_ColDelete As Office.CommandBarButton
+'--------------------------------------------------------
+' セル変更によるイベント
+'--------------------------------------------------------
+Private Sub Worksheet_Change(ByVal Target As Range)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        If EventOpeFlag = True Then
+            Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=31, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+            'Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=32, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+            EventOpeFlag = False
+        Else
+            Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=11, arg2:=Target.Address, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        End If
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Sub
+'--------------------------------------------------------
+' ダブルクリックによるイベント
+'--------------------------------------------------------
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+    If ExecuteFlag = False Then
+        ExecuteFlag = True
+        On Error Resume Next
+        Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=14, arg2:=Target.Address, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+        On Error GoTo 0
+        ExecuteFlag = False
+    End If
+End Sub
+'--------------------------------------------------------
+' ボタンクリック時の処理
+'--------------------------------------------------------
+Private Function ButtonClickFunc(arg As Integer)
+    On Error Resume Next
+    Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=arg, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    On Error GoTo 0
+    ExecuteFlag = False
+End Function
+Private Sub BTN_MenuWndDisp_Click(): Call ButtonClickFunc(21): End Sub
+Private Sub BTN_TaskWndDisp_Click(): Call ButtonClickFunc(22): End Sub
+Private Sub BTN_TodoAllDisp_Click(): Call ButtonClickFunc(23): End Sub
+Private Sub BTN_SortAllDisp_Click(): Call ButtonClickFunc(24): End Sub
+Private Sub BTN_SortEx1Disp_Click(): Call ButtonClickFunc(25): End Sub
+Private Sub BTN_SortEx2Disp_Click(): Call ButtonClickFunc(26): End Sub
+'--------------------------------------------------------
+' 行/列イベント時の処理
+'--------------------------------------------------------
+Public Sub SettingButton()
+    With Application
+        Set cmdBtn_Event_CellInsert = .CommandBars.FindControl(, 3181)
+        Set cmdBtn_Event_RawInsert = .CommandBars.FindControl(, 3183)
+        Set cmdBtn_Event_ColInsert = .CommandBars.FindControl(, 3184)
+        Set cmdBtn_Event_RawInsert2 = .CommandBars.FindControl(, 296)
+        Set cmdBtn_Event_ColInsert2 = .CommandBars.FindControl(, 297)
+        Set cmdBtn_Event_CellDelete = .CommandBars.FindControl(, 292)
+        Set cmdBtn_Event_RawDelete = .CommandBars.FindControl(, 293)
+        Set cmdBtn_Event_ColDelete = .CommandBars.FindControl(, 294)
+    End With
+    EventOpeFlag = False
+End Sub
+Private Sub cmdBtn_EventFunc()
+    If EventOpeFlag = False Then
+        EventOpeFlag = True
+        Workbooks(cnsADDIN).Application.Run ("CMD_WorkSheetExec"), arg1:=33, arg2:=Null, arg3:=ThisWorkbook.Name, arg4:=ThisWorkbook.Path
+    End If
+End Sub
+Private Sub cmdBtn_Event_CellInsert_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean): Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_RawInsert_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean):   Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_ColInsert_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean):   Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_RawInsert2_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean):  Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_ColInsert2_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean):  Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_CellDelete_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean): Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_RawDelete_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean):   Call cmdBtn_EventFunc: End Sub
+Private Sub cmdBtn_Event_ColDelete_Click(ByVal ctrl As Office.CommandBarButton, CancelDefault As Boolean):   Call cmdBtn_EventFunc: End Sub
+
